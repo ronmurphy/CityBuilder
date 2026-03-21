@@ -25,7 +25,7 @@ shadow_color = Color(0, 0, 0, 0.392157)
 
 [node name="Main" type="Node3D"]
 
-[node name="Builder" type="Node3D" parent="." node_paths=PackedStringArray("selector", "selector_container", "view_camera", "gridmap", "decoration_gridmap", "terrain_gridmap", "cash_display", "date_display", "payday_label", "week_clock", "report_panel", "building_picker", "help_panel")]
+[node name="Builder" type="Node3D" parent="." node_paths=PackedStringArray("selector", "selector_container", "view_camera", "gridmap", "decoration_gridmap", "terrain_gridmap", "cash_display", "date_display", "week_clock", "report_panel", "building_picker", "help_panel")]
 script = ExtResource("1_jybm7")
 
 selector = NodePath("Selector")
@@ -36,7 +36,6 @@ decoration_gridmap = NodePath("../DecorationGridMap")
 terrain_gridmap = NodePath("../TerrainGridMap")
 cash_display = NodePath("../CanvasLayer/Top/Cash")
 date_display = NodePath("../CanvasLayer/Top/Date")
-payday_label = NodePath("../CanvasLayer/PaydayLabel")
 week_clock = NodePath("../CanvasLayer/Top/WeekClock")
 report_panel = NodePath("../CanvasLayer/TaxReport")
 building_picker = NodePath("../CanvasLayer/BuildingPicker")
@@ -151,20 +150,6 @@ offset_bottom = 912.0
 scale = Vector2(0.5, 0.5)
 visible = false
 texture = ExtResource("22_pm3ni")
-
-[node name="PaydayLabel" type="Label" parent="CanvasLayer"]
-layout_mode = 3
-anchors_preset = 5
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -400.0
-offset_top = 80.0
-offset_right = 400.0
-offset_bottom = 120.0
-visible = false
-text = "Payday!"
-label_settings = SubResource("LabelSettings_q176i")
-horizontal_alignment = 1
 
 [node name="TaxReport" type="Control" parent="CanvasLayer"]
 script = ExtResource("26_taxreport")

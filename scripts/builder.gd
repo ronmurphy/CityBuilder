@@ -14,7 +14,6 @@ var index:int = 0 # Index of structure being built
 @export var terrain_gridmap: GridMap    # Layer 0 — auto-generated terrain
 @export var cash_display: Label
 @export var date_display: Label
-@export var payday_label: Label
 @export var week_clock: TextureRect
 @export var report_panel: Control
 @export var building_picker: BuildingPicker
@@ -44,7 +43,6 @@ var _deco_id_to_struct: Dictionary = {}
 # Economy / time
 var _cell_placed_week: Dictionary = {}   # Vector3i -> int (week placed)
 var _day_timer: float = 0.0
-var _payday_label_timer: float = 0.0
 const DAY_DURATION: float = 30.0         # real seconds per in-game day
 const PAYDAY_INTERVAL_DAYS: int = 14     # payday every 2 in-game weeks
 
@@ -79,6 +77,7 @@ func _ready():
 		building_picker.report_requested.connect(_open_report)
 		building_picker.help_requested.connect(_open_help)
 		building_picker.save_requested.connect(_do_save)
+		building_picker.history_requested.connect(func(): Toast.show_history())
 
 	# Start in browse mode — selector hidden until a building is picked
 	selector.visible = false
@@ -91,10 +90,6 @@ func _process(delta):
 
 	# Time / economy tick
 	_advance_time(delta)
-	if _payday_label_timer > 0.0:
-		_payday_label_timer -= delta
-		if _payday_label_timer <= 0.0 and payday_label:
-			payday_label.visible = false
 
 	# Keyboard / non-mouse controls always fire
 	action_cycle_structure()
@@ -412,12 +407,10 @@ func _do_payday() -> void:
 	var net := total_income - total_upkeep
 	map.cash += net
 	update_cash()
-	if payday_label:
-		var sign_str := "+" if net >= 0 else ""
-		payday_label.text = "📅 Payday!   +$%d taxes   -$%d upkeep   %s$%d net" % [
-			total_income, total_upkeep, sign_str, net]
-		payday_label.visible = true
-		_payday_label_timer = 8.0
+	var sign_str := "+" if net >= 0 else ""
+	Toast.notify("Payday!   +$%d taxes   -$%d upkeep   %s$%d net" % [
+		total_income, total_upkeep, sign_str, net],
+		preload("res://graphics/token_in.png"), 5.0)
 
 # ── Tax Report ────────────────────────────────────────────────────────────────
 
