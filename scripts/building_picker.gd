@@ -5,7 +5,6 @@ signal structure_selected(index: int)
 signal report_requested
 signal help_requested
 signal save_requested
-signal history_requested
 
 var structures: Array = []
 var current_category: String = "All"
@@ -85,15 +84,6 @@ func _build_ui() -> void:
 	help_btn.tooltip_text = "Help"
 	help_btn.pressed.connect(func(): help_requested.emit())
 	header_row.add_child(help_btn)
-
-	var history_btn := TextureButton.new()
-	history_btn.texture_normal = load("res://graphics/icon_search.png")
-	history_btn.custom_minimum_size = Vector2(20, 20)
-	history_btn.ignore_texture_size = true
-	history_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
-	history_btn.tooltip_text = "Notification History"
-	history_btn.pressed.connect(func(): history_requested.emit())
-	header_row.add_child(history_btn)
 
 	var save_btn := TextureButton.new()
 	save_btn.texture_normal = load("res://graphics/icon_save.png")

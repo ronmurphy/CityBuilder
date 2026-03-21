@@ -6,3 +6,4 @@ class_name DataMap
 @export var map_size: int = 0   # stored so a save is self-contained
 @export var map_seed: int = 0
 @export var current_day: int = 0
+@export var tax_rate: float = 0.08  # 0.0–0.20, player-controlled via City Hall

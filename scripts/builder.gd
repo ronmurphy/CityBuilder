@@ -18,6 +18,7 @@ var index:int = 0 # Index of structure being built
 @export var report_panel: Control
 @export var building_picker: BuildingPicker
 @export var help_panel: Control
+@export var population_display: Label
 
 # Week progress clock textures (timer_0 → timer_100)
 const _CLOCK_TEXTURES: Array = [
@@ -42,9 +43,21 @@ var _deco_id_to_struct: Dictionary = {}
 
 # Economy / time
 var _cell_placed_week: Dictionary = {}   # Vector3i -> int (week placed)
+var _cell_job_slots: Dictionary  = {}   # Vector3i -> int (workers, locked at placement)
 var _day_timer: float = 0.0
 const DAY_DURATION: float = 30.0         # real seconds per in-game day
 const PAYDAY_INTERVAL_DAYS: int = 14     # payday every 2 in-game weeks
+
+# Wage constants (abstract units multiplied by tax_rate each payday)
+const RESIDENT_WAGE:    int = 20   # per adult in a residential building
+const COMMERCIAL_WAGE:  int = 40   # per job slot in a commercial building
+const INDUSTRIAL_WAGE:  int = 25   # per job slot in an industrial building
+
+# Cached city stats — updated every payday and when the report is opened
+var _last_income:  int = 0
+var _last_upkeep:  int = 0
+var _payday_history: Array = []   # newest first, max 10 entries
+const MAX_PAYDAY_HISTORY: int = 10
 
 # Terrain
 var _terrain_noise: FastNoiseLite = null
@@ -77,7 +90,10 @@ func _ready():
 		building_picker.report_requested.connect(_open_report)
 		building_picker.help_requested.connect(_open_help)
 		building_picker.save_requested.connect(_do_save)
-		building_picker.history_requested.connect(func(): Toast.show_history())
+
+	if report_panel:
+		report_panel.tax_rate_changed.connect(func(rate: float) -> void:
+			map.tax_rate = rate)
 
 	# Start in browse mode — selector hidden until a building is picked
 	selector.visible = false
@@ -85,6 +101,7 @@ func _ready():
 	update_structure()
 	update_cash()
 	_update_date_display()
+	_update_population_display((_compute_city_stats().get("population", 0)) as int)
 
 func _process(delta):
 
@@ -285,6 +302,11 @@ func action_build(gridmap_position):
 		# Record placement week for aging upkeep (base layer only)
 		if not is_deco:
 			_cell_placed_week[Vector3i(gridmap_position)] = Global.current_week
+			# Lock in randomised job slots for commercial / industrial buildings
+			var s_idx: int = _base_id_to_struct.get(mid, -1)
+			if s_idx != -1:
+				_cell_job_slots[Vector3i(gridmap_position)] = \
+					_gen_job_slots(structures[s_idx].category, structures[s_idx].price)
 		# Clear terrain tile under base-layer placement; reward player for resources
 		if not is_deco and terrain_gridmap:
 			var terrain_tile := terrain_gridmap.get_cell_item(gridmap_position)
@@ -316,6 +338,7 @@ func action_demolish(gridmap_position):
 			var mid := gridmap.get_cell_item(gridmap_position)
 			gridmap.set_cell_item(gridmap_position, -1)
 			_cell_placed_week.erase(Vector3i(gridmap_position))
+			_cell_job_slots.erase(Vector3i(gridmap_position))
 			if mid in _base_id_to_struct:
 				var refund := ceili(structures[_base_id_to_struct[mid]].price / 2.0)
 				map.cash += refund
@@ -363,6 +386,18 @@ func update_structure():
 
 func update_cash():
 	cash_display.text = "$" + str(map.cash)
+	var threshold_red:    int = int(Global.starting_cash * 0.10)
+	var threshold_yellow: int = int(Global.starting_cash * 0.20)
+	if map.cash <= threshold_red:
+		cash_display.add_theme_color_override("font_color", Color(1.0, 0.25, 0.25))
+	elif map.cash <= threshold_yellow:
+		cash_display.add_theme_color_override("font_color", Color(1.0, 0.85, 0.15))
+	else:
+		cash_display.remove_theme_color_override("font_color")
+
+func _update_population_display(population: int) -> void:
+	if population_display:
+		population_display.text = "Pop: %d" % population
 
 # ── Time & Economy ────────────────────────────────────────────────────────────
 
@@ -389,27 +424,199 @@ func _update_date_display() -> void:
 		var frame := int(float(d % 7) / 7.0 * 5.0)
 		week_clock.texture = _CLOCK_TEXTURES[clampi(frame, 0, 4)]
 
-func _do_payday() -> void:
-	var total_income := 0
-	var total_upkeep := 0
+# ── Population / workforce helpers ────────────────────────────────────────────
+
+# How many residents live in a building of this price (residential only).
+func _residents_for(price: int) -> int:
+	return max(3, int(round(float(price) / 25.0)))
+
+# Randomise job slots when a commercial/industrial building is first placed.
+# The value is locked for the lifetime of the building.
+func _gen_job_slots(category: String, price: int) -> int:
+	match category:
+		"Commercial":
+			return randi_range(max(2, price / 100), max(4, price / 60))
+		"Industrial":
+			return randi_range(max(3, price / 80),  max(6, price / 50))
+		_:
+			return 0
+
+# Deterministic fallback for saves made before job_slots existed.
+func _default_job_slots(category: String, price: int) -> int:
+	match category:
+		"Commercial": return max(2, price / 80)
+		"Industrial":  return max(3, price / 65)
+		_:             return 0
+
+# Returns true if any of the four cardinal neighbours is a road tile.
+func _is_road_adjacent(cell: Vector3i, road_cells: Dictionary) -> bool:
+	return (Vector3i(cell.x + 1, cell.y, cell.z) in road_cells or
+			Vector3i(cell.x - 1, cell.y, cell.z) in road_cells or
+			Vector3i(cell.x, cell.y, cell.z + 1) in road_cells or
+			Vector3i(cell.x, cell.y, cell.z - 1) in road_cells)
+
+# Compute population / workforce / road-connectivity stats.
+func _compute_city_stats() -> Dictionary:
+	# ── 1. Build a fast road-cell lookup ──────────────────────────────────
+	var road_cells: Dictionary = {}
 	for cell in gridmap.get_used_cells():
-		var mid := gridmap.get_cell_item(cell)
+		var mid: int = gridmap.get_cell_item(cell)
+		if mid != -1 and mid in _base_id_to_struct:
+			if structures[_base_id_to_struct[mid]].category == "Roads":
+				road_cells[Vector3i(cell)] = true
+
+	# ── 2. Count residents split by road access ────────────────────────────
+	var total_residents:  int = 0
+	var commuter_adults:  int = 0   # road-adjacent → can fill any job
+	var remote_adults:    int = 0   # no road → commercial only, 70% rate
+	var commercial_slots: int = 0
+	var industrial_slots: int = 0
+	var res_count: int = 0
+	var com_count: int = 0
+	var ind_count: int = 0
+
+	for cell in gridmap.get_used_cells():
+		var mid: int = gridmap.get_cell_item(cell)
 		if mid == -1 or mid not in _base_id_to_struct:
 			continue
-		var price: int = structures[_base_id_to_struct[mid]].price
-		var income: int = floori(price * 0.05)
-		var placed_week: int = _cell_placed_week.get(cell, Global.current_week)
-		var age_weeks: int   = Global.current_week - placed_week
-		var upkeep_pct: float = minf(0.03, age_weeks * 0.001)
-		var upkeep: int = floori(price * upkeep_pct)
+		var s: Structure  = structures[_base_id_to_struct[mid]]
+		var road_adj: bool = _is_road_adjacent(Vector3i(cell), road_cells)
+		match s.category:
+			"Buildings":
+				var res: int    = _residents_for(s.price)
+				var adults: int = int(floor(res * 0.67))
+				total_residents += res
+				if road_adj:
+					commuter_adults += adults
+				else:
+					remote_adults += adults
+				res_count += 1
+			"Commercial":
+				commercial_slots += _cell_job_slots.get(Vector3i(cell), 0)
+				com_count        += 1
+			"Industrial":
+				industrial_slots += _cell_job_slots.get(Vector3i(cell), 0)
+				ind_count        += 1
+
+	# ── 3. Staffing ratios ────────────────────────────────────────────────
+	# Industrial: only commuters (you can't telecommute to a factory)
+	# Commercial: commuters + remote workers at 70%
+	var ind_workforce: int = commuter_adults
+	var com_workforce: int = commuter_adults + int(remote_adults * 0.7)
+
+	var commercial_staffing: float = 0.0
+	if commercial_slots > 0:
+		commercial_staffing = minf(1.0, float(com_workforce) / float(commercial_slots))
+
+	var industrial_staffing: float = 0.0
+	if industrial_slots > 0:
+		industrial_staffing = minf(1.0, float(ind_workforce) / float(industrial_slots))
+
+	# Weighted average for summary display
+	var total_slots: int = commercial_slots + industrial_slots
+	var staffing_ratio: float = 0.0
+	if total_slots > 0:
+		staffing_ratio = (commercial_staffing * commercial_slots +
+				industrial_staffing * industrial_slots) / float(total_slots)
+
+	var total_adults: int = commuter_adults + remote_adults
+	var total_jobs:   int = commercial_slots + industrial_slots
+
+	return {
+		"population":           total_residents,
+		"adults":               total_adults,
+		"commuter_adults":      commuter_adults,
+		"remote_adults":        remote_adults,
+		"commercial_slots":     commercial_slots,
+		"industrial_slots":     industrial_slots,
+		"job_slots":            total_jobs,
+		"employed":             mini(total_adults, total_jobs),
+		"unemployed":           max(0, total_adults - total_jobs),
+		"unfilled_jobs":        max(0, total_jobs - total_adults),
+		"commercial_staffing":  commercial_staffing,
+		"industrial_staffing":  industrial_staffing,
+		"staffing_ratio":       staffing_ratio,
+		"res_count":            res_count,
+		"com_count":            com_count,
+		"ind_count":            ind_count,
+		"road_cells":           road_cells,
+	}
+
+func _do_payday() -> void:
+	var stats: Dictionary        = _compute_city_stats()
+	var com_staffing: float      = stats["commercial_staffing"]
+	var ind_staffing: float      = stats["industrial_staffing"]
+	var road_cells: Dictionary   = stats["road_cells"]
+	var tax_rate: float          = map.tax_rate
+	var total_income: int        = 0
+	var total_upkeep: int        = 0
+
+	for cell in gridmap.get_used_cells():
+		var mid: int = gridmap.get_cell_item(cell)
+		if mid == -1 or mid not in _base_id_to_struct:
+			continue
+		var s: Structure   = structures[_base_id_to_struct[mid]]
+		var income: int    = 0
+		var road_adj: bool = _is_road_adjacent(Vector3i(cell), road_cells)
+
+		match s.category:
+			"Buildings":
+				var adults: int = int(floor(_residents_for(s.price) * 0.67))
+				income = int(floor(adults * RESIDENT_WAGE * tax_rate))
+			"Commercial":
+				var slots: int = _cell_job_slots.get(Vector3i(cell), 0)
+				var road_bonus: float = 1.15 if road_adj else 1.0
+				income = int(floor(slots * com_staffing * COMMERCIAL_WAGE * (tax_rate * 1.5) * road_bonus))
+			"Industrial":
+				var slots: int = _cell_job_slots.get(Vector3i(cell), 0)
+				# No road access = hard cap at 60% — trucks can't get in/out
+				var eff_staffing: float = minf(ind_staffing, 0.6) if not road_adj else ind_staffing
+				income = int(floor(slots * eff_staffing * INDUSTRIAL_WAGE * (tax_rate * 1.2)))
+			"Roads", "Nature":
+				pass   # zero upkeep, zero income — skip upkeep calc below
+
+		# Upkeep: roads and nature tiles are free to maintain
+		var upkeep: int = 0
+		if s.category not in ["Roads", "Nature"]:
+			var placed_week: int  = _cell_placed_week.get(cell, Global.current_week)
+			var age_weeks:   int  = Global.current_week - placed_week
+			var upkeep_pct: float = minf(0.03, age_weeks * 0.001)
+			upkeep = floori(s.price * upkeep_pct)
+
 		total_income += income
 		total_upkeep += upkeep
-	var net := total_income - total_upkeep
-	map.cash += net
+
+	var net: int = total_income - total_upkeep
+	map.cash    += net
+	_last_income = total_income
+	_last_upkeep = total_upkeep
 	update_cash()
-	var sign_str := "+" if net >= 0 else ""
-	Toast.notify("Payday!   +$%d taxes   -$%d upkeep   %s$%d net" % [
-		total_income, total_upkeep, sign_str, net],
+	_update_population_display(stats["population"] as int)
+
+	# Record payday in history (newest first)
+	var ind_pct: int = int(ind_staffing * 100.0)
+	var com_pct: int = int(com_staffing * 100.0)
+	_payday_history.push_front({
+		"week":         Global.current_week,
+		"income":       total_income,
+		"upkeep":       total_upkeep,
+		"net":          net,
+		"ind_pct":      ind_pct,
+		"com_pct":      com_pct,
+		"population":   stats["population"] as int,
+	})
+	if _payday_history.size() > MAX_PAYDAY_HISTORY:
+		_payday_history.pop_back()
+
+	# Toast — show staffing warnings if either sector is below 100%
+	var sign_str: String    = "+" if net >= 0 else ""
+	var staffing_str: String = ""
+	if ind_pct < 100 and stats["industrial_slots"] as int > 0:
+		staffing_str += "   ·   Industry %d%%  → build road-side houses" % ind_pct
+	if com_pct < 100 and stats["commercial_slots"] as int > 0:
+		staffing_str += "   ·   Commercial %d%%  → build more houses" % com_pct
+	Toast.notify("Payday!   +$%d taxes   -$%d upkeep   %s$%d net%s" % [
+		total_income, total_upkeep, sign_str, net, staffing_str],
 		preload("res://graphics/token_in.png"), 5.0)
 
 # ── Tax Report ────────────────────────────────────────────────────────────────
@@ -417,22 +624,59 @@ func _do_payday() -> void:
 func _open_report() -> void:
 	if not report_panel:
 		return
-	var rows: Array = []
-	var total_income := 0
-	var total_upkeep := 0
+
+	var stats: Dictionary      = _compute_city_stats()
+	var com_staffing: float    = stats["commercial_staffing"]
+	var ind_staffing: float    = stats["industrial_staffing"]
+	var road_cells: Dictionary = stats["road_cells"]
+	var tax_rate: float        = map.tax_rate
+	var rows: Array            = []
+	var total_income: int      = 0
+	var total_upkeep: int      = 0
+
 	for cell in gridmap.get_used_cells():
-		var mid := gridmap.get_cell_item(cell)
+		var mid: int = gridmap.get_cell_item(cell)
 		if mid == -1 or mid not in _base_id_to_struct:
 			continue
-		var s := structures[_base_id_to_struct[mid]]
-		var income    := floori(s.price * 0.05)
-		var placed_w: int = _cell_placed_week.get(cell, Global.current_week)
-		var age: int      = Global.current_week - placed_w
-		var upk_pct   := minf(0.03, age * 0.001)
-		var upkeep    := floori(s.price * upk_pct)
+		var s: Structure   = structures[_base_id_to_struct[mid]]
+		var road_adj: bool = _is_road_adjacent(Vector3i(cell), road_cells)
+
+		var income: int = 0
+		var people: int = 0
+
+		match s.category:
+			"Buildings":
+				var adults: int = int(floor(_residents_for(s.price) * 0.67))
+				income = int(floor(adults * RESIDENT_WAGE * tax_rate))
+				people = _residents_for(s.price)
+			"Commercial":
+				var slots: int = _cell_job_slots.get(Vector3i(cell), 0)
+				var road_bonus: float = 1.15 if road_adj else 1.0
+				income = int(floor(slots * com_staffing * COMMERCIAL_WAGE * (tax_rate * 1.5) * road_bonus))
+				people = slots
+			"Industrial":
+				var slots: int = _cell_job_slots.get(Vector3i(cell), 0)
+				var eff_staffing: float = minf(ind_staffing, 0.6) if not road_adj else ind_staffing
+				income = int(floor(slots * eff_staffing * INDUSTRIAL_WAGE * (tax_rate * 1.2)))
+				people = slots
+			_:
+				continue   # skip roads, nature, decorations
+
+		# Roads have zero upkeep
+		var age: int       = 0
+		var upk_pct: float = 0.0
+		var upkeep: int    = 0
+		if s.category not in ["Roads", "Nature"]:
+			var placed_w: int = _cell_placed_week.get(cell, Global.current_week)
+			age     = Global.current_week - placed_w
+			upk_pct = minf(0.03, age * 0.001)
+			upkeep  = floori(s.price * upk_pct)
+
 		rows.append({
 			"name":       s.display_name,
-			"price":      s.price,
+			"zone":       s.category,
+			"road_adj":   road_adj,
+			"people":     people,
 			"income":     income,
 			"age":        age,
 			"upkeep_pct": upk_pct * 100.0,
@@ -441,7 +685,8 @@ func _open_report() -> void:
 		})
 		total_income += income
 		total_upkeep += upkeep
-	report_panel.show_report(rows, total_income, total_upkeep)
+
+	report_panel.show_report(rows, total_income, total_upkeep, stats, map.tax_rate, _payday_history)
 
 
 func _open_help() -> void:
@@ -469,6 +714,7 @@ func _do_load(path: String) -> void:
 	Global.current_day  = map.current_day
 	Global.current_week = Global.current_day / 7
 	_cell_placed_week.clear()
+	_cell_job_slots.clear()
 	generate_terrain()
 	gridmap.clear()
 	if decoration_gridmap:
@@ -481,6 +727,13 @@ func _do_load(path: String) -> void:
 			_cell_placed_week[gpos] = cell.placed_week
 			if terrain_gridmap:
 				terrain_gridmap.set_cell_item(gpos, -1)
+			# Restore job slots; fall back to deterministic default for old saves
+			var slots := cell.job_slots
+			if slots == 0 and cell.structure in _base_id_to_struct:
+				var s_idx: int = _base_id_to_struct[cell.structure]
+				slots = _default_job_slots(structures[s_idx].category, structures[s_idx].price)
+			if slots > 0:
+				_cell_job_slots[gpos] = slots
 	_update_date_display()
 
 
@@ -504,6 +757,7 @@ func _do_save() -> void:
 		ds.structure    = gridmap.get_cell_item(cell)
 		ds.layer        = 0
 		ds.placed_week  = _cell_placed_week.get(cell, 0)
+		ds.job_slots    = _cell_job_slots.get(cell, 0)
 		map.structures.append(ds)
 	if decoration_gridmap:
 		for cell in decoration_gridmap.get_used_cells():
@@ -524,6 +778,7 @@ func action_load():
 		print("Loading map from slot: ", Global.save_slot)
 		_do_load(Global.save_path())
 		update_cash()
+		_update_population_display((_compute_city_stats().get("population", 0)) as int)
 
 func action_load_resources():
 	if Input.is_action_just_pressed("load_resources"):
