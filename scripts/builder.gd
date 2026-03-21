@@ -54,6 +54,7 @@ var _terrain_mesh_ids: Dictionary = {}     # glb basename  -> mesh library id
 var _terrain_rewards: Dictionary  = {}     # mesh library id -> cash reward
 
 const PICKER_WIDTH:int = 320 # Must match building_picker.gd offset_left
+const _SAVE_ICON = preload("res://graphics/icon_save.png")
 
 func _ready():
 
@@ -77,6 +78,7 @@ func _ready():
 		building_picker.structure_selected.connect(select_structure)
 		building_picker.report_requested.connect(_open_report)
 		building_picker.help_requested.connect(_open_help)
+		building_picker.save_requested.connect(_do_save)
 
 	# Start in browse mode — selector hidden until a building is picked
 	selector.visible = false
@@ -493,31 +495,36 @@ func _do_load(path: String) -> void:
 
 func action_save():
 	if Input.is_action_just_pressed("save"):
-		print("Saving map to slot: ", Global.save_slot)
-		map.map_size    = Global.map_size
-		map.map_seed    = Global.map_seed
-		map.current_day = Global.current_day
-		map.structures.clear()
-		for cell in gridmap.get_used_cells():
+		_do_save()
+
+
+func _do_save() -> void:
+	print("Saving map to slot: ", Global.save_slot)
+	map.map_size    = Global.map_size
+	map.map_seed    = Global.map_seed
+	map.current_day = Global.current_day
+	map.structures.clear()
+	for cell in gridmap.get_used_cells():
+		var ds := DataStructure.new()
+		ds.position     = Vector2i(cell.x, cell.z)
+		ds.orientation  = gridmap.get_cell_item_orientation(cell)
+		ds.structure    = gridmap.get_cell_item(cell)
+		ds.layer        = 0
+		ds.placed_week  = _cell_placed_week.get(cell, 0)
+		map.structures.append(ds)
+	if decoration_gridmap:
+		for cell in decoration_gridmap.get_used_cells():
 			var ds := DataStructure.new()
-			ds.position     = Vector2i(cell.x, cell.z)
-			ds.orientation  = gridmap.get_cell_item_orientation(cell)
-			ds.structure    = gridmap.get_cell_item(cell)
-			ds.layer        = 0
-			ds.placed_week  = _cell_placed_week.get(cell, 0)
+			ds.position    = Vector2i(cell.x, cell.z)
+			ds.orientation = decoration_gridmap.get_cell_item_orientation(cell)
+			ds.structure   = decoration_gridmap.get_cell_item(cell)
+			ds.layer       = 1
 			map.structures.append(ds)
-		if decoration_gridmap:
-			for cell in decoration_gridmap.get_used_cells():
-				var ds := DataStructure.new()
-				ds.position    = Vector2i(cell.x, cell.z)
-				ds.orientation = decoration_gridmap.get_cell_item_orientation(cell)
-				ds.structure   = decoration_gridmap.get_cell_item(cell)
-				ds.layer       = 1
-				map.structures.append(ds)
-		if OS.has_feature("web"):
-			Global.web_save(map)
-		else:
-			ResourceSaver.save(map, Global.save_path())
+	if OS.has_feature("web"):
+		Global.web_save(map)
+	else:
+		ResourceSaver.save(map, Global.save_path())
+	Toast.notify("Game saved!", _SAVE_ICON)
 
 func action_load():
 	if Input.is_action_just_pressed("load"):

@@ -25,6 +25,7 @@ config/icon="res://icon.png"
 
 Audio="*res://scripts/audio.gd"
 Global="*res://scripts/global.gd"
+Toast="*res://scripts/toast.gd"
 
 [display]
 

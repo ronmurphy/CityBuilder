@@ -4,6 +4,7 @@ class_name BuildingPicker
 signal structure_selected(index: int)
 signal report_requested
 signal help_requested
+signal save_requested
 
 var structures: Array = []
 var current_category: String = "All"
@@ -83,6 +84,15 @@ func _build_ui() -> void:
 	help_btn.tooltip_text = "Help"
 	help_btn.pressed.connect(func(): help_requested.emit())
 	header_row.add_child(help_btn)
+
+	var save_btn := TextureButton.new()
+	save_btn.texture_normal = load("res://graphics/icon_save.png")
+	save_btn.custom_minimum_size = Vector2(20, 20)
+	save_btn.ignore_texture_size = true
+	save_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	save_btn.tooltip_text = "Save Game"
+	save_btn.pressed.connect(func(): save_requested.emit())
+	header_row.add_child(save_btn)
 
 	vbox.add_child(HSeparator.new())
 
