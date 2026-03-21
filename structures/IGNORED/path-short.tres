@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="Structure" load_steps=4 format=3]
+
+[ext_resource type="PackedScene" uid="uid://ccmd1t81tdpdp" path="res://models/City Kit - Suburban/Models/GLB format/path-short.glb" id="1_glb"]
+[ext_resource type="Script" uid="uid://b4i7dfy6u3e8w" path="res://scripts/structure.gd" id="2_script"]
+[ext_resource type="Texture2D" uid="uid://bikx76n5vg2hc" path="res://models/City Kit - Suburban/Previews/path-short.png" id="3_thumb"]
+
+[resource]
+script = ExtResource("2_script")
+display_name = "Path Short"
+category = "Paths"
+model = ExtResource("1_glb")
+price = 15
+layer = 0
+thumbnail = ExtResource("3_thumb")

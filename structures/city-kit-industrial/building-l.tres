@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="Structure" load_steps=4 format=3]
+
+[ext_resource type="PackedScene" uid="uid://b4r2otd3qxo3o" path="res://models/City Kit - Industrial/Models/GLB format/building-l.glb" id="1_glb"]
+[ext_resource type="Script" uid="uid://b4i7dfy6u3e8w" path="res://scripts/structure.gd" id="2_script"]
+[ext_resource type="Texture2D" uid="uid://14gnya5nqh5f" path="res://models/City Kit - Industrial/Previews/building-l.png" id="3_thumb"]
+
+[resource]
+script = ExtResource("2_script")
+display_name = "Factory L"
+category = "Industrial"
+model = ExtResource("1_glb")
+price = 100
+layer = 0
+thumbnail = ExtResource("3_thumb")

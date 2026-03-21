@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="Structure" load_steps=4 format=3]
+
+[ext_resource type="PackedScene" uid="uid://ccxt7sl71y8nv" path="res://models/Retro Urban Kit/Models/GLB format/wall-b-roof.glb" id="1_glb"]
+[ext_resource type="Script" uid="uid://b4i7dfy6u3e8w" path="res://scripts/structure.gd" id="2_script"]
+[ext_resource type="Texture2D" uid="uid://clcgd0wj4wj8p" path="res://models/Retro Urban Kit/Previews/wall-b-roof.png" id="3_thumb"]
+
+[resource]
+script = ExtResource("2_script")
+display_name = "Wall B Roof"
+category = "Retro Walls"
+model = ExtResource("1_glb")
+price = 40
+layer = 0
+thumbnail = ExtResource("3_thumb")

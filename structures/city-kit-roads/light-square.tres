@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="Structure" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/structure.gd" id="1"]
+[ext_resource type="PackedScene" path="res://models/City Kit - Roads/Models/GLB format/light-square.glb" id="2"]
+[ext_resource type="Texture2D" path="res://models/City Kit - Roads/Previews/light-square.png" id="3"]
+[resource]
+script = ExtResource("1")
+display_name = "Light Square"
+category = "Lights"
+model = ExtResource("2")
+price = 30
+layer = 1
+thumbnail = ExtResource("3")
