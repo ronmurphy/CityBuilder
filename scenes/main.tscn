@@ -1,4 +1,4 @@
-[gd_scene load_steps=18 format=3 uid="uid://vgwrcfy1qawf"]
+[gd_scene load_steps=19 format=3 uid="uid://vgwrcfy1qawf"]
 
 [ext_resource type="Script" uid="uid://76g8ejmdibal" path="res://scripts/builder.gd" id="1_jybm7"]
 [ext_resource type="Environment" uid="uid://jbptgqvstei3" path="res://scenes/main-environment.tres" id="1_yndf3"]
@@ -19,6 +19,7 @@
 [ext_resource type="Texture2D" path="res://graphics/tokens.png" id="29_tokens"]
 [ext_resource type="Texture2D" path="res://graphics/pawns.png" id="31_pawns"]
 [ext_resource type="Script" path="res://scripts/weather.gd" id="32_weather"]
+[ext_resource type="Script" path="res://scripts/day_cycle.gd" id="33_daycycle"]
 
 [sub_resource type="LabelSettings" id="LabelSettings_q176i"]
 font = ExtResource("16_vlub6")
@@ -194,6 +195,11 @@ script = ExtResource("30_helpoverlay")
 [node name="Weather" type="Node" parent="." node_paths=PackedStringArray("weather_label")]
 script = ExtResource("32_weather")
 weather_label = NodePath("../CanvasLayer/Top/WeatherLabel")
+
+[node name="DayCycle" type="Node" parent="." node_paths=PackedStringArray("camera", "sun")]
+script = ExtResource("33_daycycle")
+camera = NodePath("../View/Camera")
+sun = NodePath("../Sun")
 
 [node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("24_y6deb")

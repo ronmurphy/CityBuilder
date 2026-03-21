@@ -7,3 +7,5 @@ class_name DataMap
 @export var map_seed: int = 0
 @export var current_day: int = 0
 @export var tax_rate: float = 0.08  # 0.0–0.20, player-controlled via City Hall
+@export var payday_count: int = 0       # total paydays elapsed (tracks grace period)
+@export var day_cycle_enabled: bool = true  # day/night colour cycle on or off

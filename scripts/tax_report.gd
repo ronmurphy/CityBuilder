@@ -217,10 +217,17 @@ func _on_tax_slider_changed(value: float) -> void:
 # ── Tab: Population ───────────────────────────────────────────────────────────
 
 func _build_population_tab(tabs: TabContainer) -> void:
+	# Wrap everything in a scroll container so tall content isn't clipped
+	var scroll := ScrollContainer.new()
+	scroll.name = "Population"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_child(scroll)
+
 	var vbox := VBoxContainer.new()
-	vbox.name = "Population"
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", 6)
-	tabs.add_child(vbox)
+	scroll.add_child(vbox)
 
 	var sp := Control.new()
 	sp.custom_minimum_size = Vector2(0, 6)
@@ -263,10 +270,18 @@ func _build_population_tab(tabs: TabContainer) -> void:
 	_pop_labels["com_count"] = _stat_row(vbox, "Commercial buildings")
 	_pop_labels["ind_count"] = _stat_row(vbox, "Industrial buildings")
 
+	vbox.add_child(HSeparator.new())
+
+	# City Mood section
+	_section_label(vbox, "City Mood")
+	_pop_labels["avg_patience"]   = _stat_row(vbox, "Happiness  (0 – 10)")
+	_pop_labels["mood_desc"]      = _stat_row(vbox, "Mood")
+	_pop_labels["grace_period"]   = _stat_row(vbox, "Grace period")
+
 	# Hint
 	vbox.add_child(HSeparator.new())
 	var hint := Label.new()
-	hint.text = "Roads cost nothing to maintain. Build roads beside factories — workers need to drive in. Shops and offices can be reached remotely."
+	hint.text = "Roads cost nothing to maintain. Build roads beside factories.\n\nHappiness: taxes ≤8% slowly recover patience (+1/payday). High taxes and unemployment drain it. At 0 patience, families leave — no refund. First 4 paydays are a grace period."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
 	vbox.add_child(hint)
@@ -418,6 +433,51 @@ func show_report(rows: Array, total_income: int, total_upkeep: int,
 	unfill_lbl.add_theme_color_override("font_color",
 		Color(1.0, 0.7, 0.3) if unfilled > 0 else Color(0.6, 1.0, 0.6))
 
+	# ── City Mood ──────────────────────────────────────────────────────────
+	var avg_pat: float = pop_data.get("avg_patience",          -1.0) as float
+	var grace:   int   = pop_data.get("payday_grace_remaining",  0)  as int
+
+	if avg_pat < 0.0:
+		# No residential buildings yet
+		_pop_labels["avg_patience"].text = "—"
+		_pop_labels["mood_desc"].text    = "—"
+		_pop_labels["avg_patience"].remove_theme_color_override("font_color")
+		_pop_labels["mood_desc"].remove_theme_color_override("font_color")
+	else:
+		var mood_desc: String
+		var mood_color: Color
+		if avg_pat >= 8.5:
+			mood_desc  = "Content"
+			mood_color = Color(0.60, 1.00, 0.60)
+		elif avg_pat >= 6.5:
+			mood_desc  = "Comfortable"
+			mood_color = Color(0.70, 0.90, 0.70)
+		elif avg_pat >= 4.5:
+			mood_desc  = "Neutral"
+			mood_color = Color(0.85, 0.85, 0.85)
+		elif avg_pat >= 2.5:
+			mood_desc  = "Grumbling"
+			mood_color = Color(1.00, 0.85, 0.40)
+		else:
+			mood_desc  = "Angry"
+			mood_color = Color(1.00, 0.40, 0.40)
+
+		var ap_lbl: Label = _pop_labels["avg_patience"]
+		ap_lbl.text = "%.1f / 10" % avg_pat
+		ap_lbl.add_theme_color_override("font_color", mood_color)
+
+		var md_lbl: Label = _pop_labels["mood_desc"]
+		md_lbl.text = mood_desc
+		md_lbl.add_theme_color_override("font_color", mood_color)
+
+	var gr_lbl: Label = _pop_labels["grace_period"]
+	if grace > 0:
+		gr_lbl.text = "%d paydays remaining" % grace
+		gr_lbl.add_theme_color_override("font_color", Color(0.60, 0.80, 1.00))
+	else:
+		gr_lbl.text = "Expired — happiness is active"
+		gr_lbl.add_theme_color_override("font_color", Color(0.60, 0.60, 0.60))
+
 	visible = true
 
 
@@ -536,6 +596,8 @@ func _build_tax_help() -> void:
 			"Adults from residential buildings fill job slots city-wide.\nIf adults < job slots, businesses run at partial capacity.\nBuild more houses to raise the staffing ratio to 100%."],
 		["Upkeep",
 			"All buildings age and require more maintenance over time.\nUpkeep starts at 0% and rises by 0.1% per week, capped at 3%."],
+		["Happiness & Patience",
+			"Every house has a patience score (0–10). The first 4 paydays are a grace period.\n\n≤ 8% tax: +1 recovery each payday.\n9–12%: -1 per payday.\n13–16%: -2 per payday.\n17–20%: -3 or -4 per payday.\n\nHigh unemployment (> 20% of adults) adds an extra -1 drain.\n\nAt patience 0 the family moves out — no refund, terrain is restored."],
 	]
 
 	for pair in sections:

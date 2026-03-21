@@ -44,9 +44,12 @@ var _deco_id_to_struct: Dictionary = {}
 # Economy / time
 var _cell_placed_week: Dictionary = {}   # Vector3i -> int (week placed)
 var _cell_job_slots: Dictionary  = {}   # Vector3i -> int (workers, locked at placement)
+var _cell_patience: Dictionary   = {}   # Vector3i -> int (0–10, residential only)
+var _payday_count: int = 0              # total paydays elapsed (tracks grace period)
 var _day_timer: float = 0.0
 const DAY_DURATION: float = 30.0         # real seconds per in-game day
 const PAYDAY_INTERVAL_DAYS: int = 14     # payday every 2 in-game weeks
+const GRACE_PERIOD_PAYDAYS: int = 4      # first N paydays immune from patience loss
 
 # Wage constants (abstract units multiplied by tax_rate each payday)
 const RESIDENT_WAGE:    int = 20   # per adult in a residential building
@@ -66,6 +69,7 @@ var _terrain_rewards: Dictionary  = {}     # mesh library id -> cash reward
 
 const PICKER_WIDTH:int = 320 # Must match building_picker.gd offset_left
 const _SAVE_ICON = preload("res://graphics/icon_save.png")
+const _WARN_ICON = preload("res://graphics/information.png")
 
 func _ready():
 
@@ -82,6 +86,7 @@ func _ready():
 	else:
 		map = DataMap.new()
 		map.cash = Global.starting_cash
+		_payday_count = 0   # fresh game always starts in the grace period
 		generate_terrain()
 
 	if building_picker:
@@ -307,6 +312,9 @@ func action_build(gridmap_position):
 			if s_idx != -1:
 				_cell_job_slots[Vector3i(gridmap_position)] = \
 					_gen_job_slots(structures[s_idx].category, structures[s_idx].price)
+				# New residential buildings start with slightly varied patience
+				if structures[s_idx].category == "Buildings":
+					_cell_patience[Vector3i(gridmap_position)] = randi_range(8, 10)
 		# Clear terrain tile under base-layer placement; reward player for resources
 		if not is_deco and terrain_gridmap:
 			var terrain_tile := terrain_gridmap.get_cell_item(gridmap_position)
@@ -320,6 +328,7 @@ func action_build(gridmap_position):
 			map.cash -= structures[index].price
 			update_cash()
 			Audio.play("sounds/placement-a.ogg, sounds/placement-b.ogg, sounds/placement-c.ogg, sounds/placement-d.ogg", -20)
+			_update_population_display((_compute_city_stats().get("population", 0)) as int)
 
 # Demolish (remove) a structure — decoration layer first, then base
 
@@ -339,6 +348,7 @@ func action_demolish(gridmap_position):
 			gridmap.set_cell_item(gridmap_position, -1)
 			_cell_placed_week.erase(Vector3i(gridmap_position))
 			_cell_job_slots.erase(Vector3i(gridmap_position))
+			_cell_patience.erase(Vector3i(gridmap_position))
 			if mid in _base_id_to_struct:
 				var refund := ceili(structures[_base_id_to_struct[mid]].price / 2.0)
 				map.cash += refund
@@ -351,6 +361,7 @@ func action_demolish(gridmap_position):
 			removed = true
 		if removed:
 			Audio.play("sounds/removal-a.ogg, sounds/removal-b.ogg, sounds/removal-c.ogg, sounds/removal-d.ogg", -20)
+			_update_population_display((_compute_city_stats().get("population", 0)) as int)
 
 # Rotates the 'cursor' 90 degrees
 
@@ -399,10 +410,95 @@ func _update_population_display(population: int) -> void:
 	if population_display:
 		population_display.text = "Pop: %d" % population
 
+# Colour the population label based on average city mood
+func _update_mood_display(avg_patience: float) -> void:
+	if not population_display:
+		return
+	if avg_patience < 0.0:            # no residential buildings → no colour
+		population_display.remove_theme_color_override("font_color")
+	elif avg_patience <= 2.5:
+		population_display.add_theme_color_override("font_color", Color(1.0, 0.30, 0.30))
+	elif avg_patience <= 5.0:
+		population_display.add_theme_color_override("font_color", Color(1.0, 0.85, 0.15))
+	else:
+		population_display.remove_theme_color_override("font_color")
+
+# ── Happiness / patience tick ─────────────────────────────────────────────────
+# Called once per payday after the grace period ends.
+# Reads current tax rate + unemployment, adjusts patience for every house,
+# and evicts any that hit 0.
+func _tick_patience(stats: Dictionary) -> void:
+	var tax_pct: int      = int(map.tax_rate * 100.0)
+	var total_adults: int = stats.get("adults", 0) as int
+	var unemp_rate: float = 0.0
+	if total_adults > 0:
+		unemp_rate = float(stats.get("unemployed", 0) as int) / float(total_adults)
+
+	# Patience change this payday from tax rate
+	var patience_delta: int
+	if tax_pct <= 8:
+		patience_delta = 1          # low taxes → slow recovery
+	elif tax_pct <= 12:
+		patience_delta = -1         # mild pressure
+	elif tax_pct <= 16:
+		patience_delta = -2         # moderate drain
+	else:
+		patience_delta = -3 - (1 if randf() < 0.5 else 0)   # heavy drain, some randomness
+
+	# Extra drain when unemployment is high (> 20 % of adults)
+	var unemp_drain: int = -1 if unemp_rate > 0.20 else 0
+	var total_delta: int = patience_delta + unemp_drain
+
+	var cells_to_evict: Array[Vector3i] = []
+	var patience_min: int = 10
+	var any_near_leaving: bool = false
+
+	for cell in gridmap.get_used_cells():
+		var mid: int = gridmap.get_cell_item(cell)
+		if mid == -1 or mid not in _base_id_to_struct:
+			continue
+		var s: Structure = structures[_base_id_to_struct[mid]]
+		if s.category != "Buildings":
+			continue
+
+		var vcell: Vector3i = Vector3i(cell)
+		# Per-building random variation so houses don't all leave on the same tick
+		var jitter: int = randi_range(-1, 1)
+		var p: int = clampi(_cell_patience.get(vcell, 10) + total_delta + jitter, 0, 10)
+		_cell_patience[vcell] = p
+		patience_min = mini(patience_min, p)
+		if p == 0:
+			cells_to_evict.append(vcell)
+		elif p <= 2:
+			any_near_leaving = true
+
+	# Evict houses at patience 0 — no refund, terrain restored
+	var evicted: int = cells_to_evict.size()
+	for vcell in cells_to_evict:
+		gridmap.set_cell_item(vcell, -1)
+		_cell_placed_week.erase(vcell)
+		_cell_job_slots.erase(vcell)
+		_cell_patience.erase(vcell)
+		if terrain_gridmap:
+			var tile: int = _get_terrain_tile(vcell.x, vcell.z)
+			if tile != -1:
+				terrain_gridmap.set_cell_item(vcell, tile)
+
+	# Toasts — only one per payday so we don't spam
+	if evicted > 0:
+		var msg: String = "A family has packed up and moved out!" if evicted == 1 \
+			else "%d families have packed up and moved out!" % evicted
+		Toast.notify(msg, _WARN_ICON, 6.0)
+	elif any_near_leaving:
+		Toast.notify("Warning: some families are seriously considering leaving!", _WARN_ICON, 5.0)
+	elif patience_min <= 4 and patience_min > 2:
+		Toast.notify("Citizens are grumbling about taxes and unemployment.", _WARN_ICON, 4.0)
+
 # ── Time & Economy ────────────────────────────────────────────────────────────
 
 func _advance_time(delta: float) -> void:
 	_day_timer += delta
+	Global.day_progress = _day_timer / DAY_DURATION   # 0.0 – 1.0 within the current day
 	if _day_timer >= DAY_DURATION:
 		_day_timer -= DAY_DURATION
 		Global.current_day += 1
@@ -410,6 +506,13 @@ func _advance_time(delta: float) -> void:
 		_update_date_display()
 		if Global.current_day % PAYDAY_INTERVAL_DAYS == 0:
 			_do_payday()
+		# Patience ticks weekly (every 7 days) for faster feedback than payday
+		if Global.current_day % 7 == 0 and _payday_count > GRACE_PERIOD_PAYDAYS:
+			var stats: Dictionary = _compute_city_stats()
+			_tick_patience(stats)
+			var fresh: Dictionary = _compute_city_stats()
+			_update_population_display(fresh.get("population", 0) as int)
+			_update_mood_display(fresh.get("avg_patience", 10.0) as float)
 
 func _update_date_display() -> void:
 	var d      := Global.current_day
@@ -474,6 +577,9 @@ func _compute_city_stats() -> Dictionary:
 	var res_count: int = 0
 	var com_count: int = 0
 	var ind_count: int = 0
+	var patience_sum: int = 0
+	var patience_count: int = 0
+	var min_patience: int = 10
 
 	for cell in gridmap.get_used_cells():
 		var mid: int = gridmap.get_cell_item(cell)
@@ -491,6 +597,10 @@ func _compute_city_stats() -> Dictionary:
 				else:
 					remote_adults += adults
 				res_count += 1
+				var p: int = _cell_patience.get(Vector3i(cell), 10)
+				patience_sum   += p
+				patience_count += 1
+				min_patience    = mini(min_patience, p)
 			"Commercial":
 				commercial_slots += _cell_job_slots.get(Vector3i(cell), 0)
 				com_count        += 1
@@ -540,6 +650,9 @@ func _compute_city_stats() -> Dictionary:
 		"com_count":            com_count,
 		"ind_count":            ind_count,
 		"road_cells":           road_cells,
+		"avg_patience":         float(patience_sum) / float(patience_count) if patience_count > 0 else -1.0,
+		"min_patience":         min_patience if patience_count > 0 else 10,
+		"payday_grace_remaining": max(0, GRACE_PERIOD_PAYDAYS - _payday_count),
 	}
 
 func _do_payday() -> void:
@@ -591,9 +704,9 @@ func _do_payday() -> void:
 	_last_income = total_income
 	_last_upkeep = total_upkeep
 	update_cash()
-	_update_population_display(stats["population"] as int)
 
-	# Record payday in history (newest first)
+	# Record payday in history (newest first, before evictions so pop is pre-eviction)
+	_payday_count += 1
 	var ind_pct: int = int(ind_staffing * 100.0)
 	var com_pct: int = int(com_staffing * 100.0)
 	_payday_history.push_front({
@@ -618,6 +731,8 @@ func _do_payday() -> void:
 	Toast.notify("Payday!   +$%d taxes   -$%d upkeep   %s$%d net%s" % [
 		total_income, total_upkeep, sign_str, net, staffing_str],
 		preload("res://graphics/token_in.png"), 5.0)
+
+	_update_population_display(stats.get("population", 0) as int)
 
 # ── Tax Report ────────────────────────────────────────────────────────────────
 
@@ -713,8 +828,13 @@ func _do_load(path: String) -> void:
 	Global.pending_load = false
 	Global.current_day  = map.current_day
 	Global.current_week = Global.current_day / 7
+	# Derive payday count from the calendar so loaded saves always reflect the
+	# correct grace period — Month 3, Year 1 onward (day 56+) means it's expired.
+	_payday_count = Global.current_day / PAYDAY_INTERVAL_DAYS
+	Global.day_cycle_enabled = map.day_cycle_enabled
 	_cell_placed_week.clear()
 	_cell_job_slots.clear()
+	_cell_patience.clear()
 	generate_terrain()
 	gridmap.clear()
 	if decoration_gridmap:
@@ -734,6 +854,8 @@ func _do_load(path: String) -> void:
 				slots = _default_job_slots(structures[s_idx].category, structures[s_idx].price)
 			if slots > 0:
 				_cell_job_slots[gpos] = slots
+			# Restore patience (defaults to 10 for old saves via DataStructure @export default)
+			_cell_patience[gpos] = cell.patience
 	_update_date_display()
 
 
@@ -749,6 +871,8 @@ func _do_save() -> void:
 	map.map_size    = Global.map_size
 	map.map_seed    = Global.map_seed
 	map.current_day = Global.current_day
+	map.payday_count      = _payday_count
+	map.day_cycle_enabled = Global.day_cycle_enabled
 	map.structures.clear()
 	for cell in gridmap.get_used_cells():
 		var ds := DataStructure.new()
@@ -758,6 +882,7 @@ func _do_save() -> void:
 		ds.layer        = 0
 		ds.placed_week  = _cell_placed_week.get(cell, 0)
 		ds.job_slots    = _cell_job_slots.get(cell, 0)
+		ds.patience     = _cell_patience.get(cell, 10)
 		map.structures.append(ds)
 	if decoration_gridmap:
 		for cell in decoration_gridmap.get_used_cells():
