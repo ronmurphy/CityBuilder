@@ -13,10 +13,24 @@ var index:int = 0 # Index of structure being built
 @export var decoration_gridmap: GridMap # Layer 2 — lights, signs, construction
 @export var terrain_gridmap: GridMap    # Layer 0 — auto-generated terrain
 @export var cash_display: Label
+@export var date_display: Label
+@export var payday_label: Label
+@export var week_clock: TextureRect
+@export var report_panel: Control
 @export var building_picker: BuildingPicker
+
+# Week progress clock textures (timer_0 → timer_100)
+const _CLOCK_TEXTURES: Array = [
+	preload("res://graphics/timer_0.png"),
+	preload("res://graphics/timer_CCW_25.png"),
+	preload("res://graphics/timer_CCW_50.png"),
+	preload("res://graphics/timer_CCW_75.png"),
+	preload("res://graphics/timer_100.png"),
+]
 
 var plane: Plane # Used for raycasting mouse
 var last_gridmap_position: Vector3 = Vector3.ZERO
+var _placing: bool = false  # true when a structure is selected and ready to place
 
 # Per-structure mesh library IDs and layer assignments (built in _ready)
 var _struct_mesh_id: Array[int] = []
@@ -25,6 +39,13 @@ var _struct_layer:   Array[int] = []
 # Reverse-lookup: mesh library id -> structure index (for refund on demolish)
 var _base_id_to_struct: Dictionary = {}
 var _deco_id_to_struct: Dictionary = {}
+
+# Economy / time
+var _cell_placed_week: Dictionary = {}   # Vector3i -> int (week placed)
+var _day_timer: float = 0.0
+var _payday_label_timer: float = 0.0
+const DAY_DURATION: float = 30.0         # real seconds per in-game day
+const PAYDAY_INTERVAL_DAYS: int = 14     # payday every 2 in-game weeks
 
 # Terrain
 var _terrain_noise: FastNoiseLite = null
@@ -53,11 +74,23 @@ func _ready():
 	if building_picker:
 		building_picker.populate(structures)
 		building_picker.structure_selected.connect(select_structure)
+		building_picker.report_requested.connect(_open_report)
+
+	# Start in browse mode — selector hidden until a building is picked
+	selector.visible = false
 
 	update_structure()
 	update_cash()
+	_update_date_display()
 
 func _process(delta):
+
+	# Time / economy tick
+	_advance_time(delta)
+	if _payday_label_timer > 0.0:
+		_payday_label_timer -= delta
+		if _payday_label_timer <= 0.0 and payday_label:
+			payday_label.visible = false
 
 	# Keyboard / non-mouse controls always fire
 	action_cycle_structure()
@@ -182,8 +215,22 @@ func _load_structures() -> void:
 		return a.display_name < b.display_name)
 	print("[Builder] Loaded %d structures" % structures.size())
 
-# Returns true when the mouse is inside the right-side picker panel
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if report_panel and report_panel.visible:
+			return  # let tax_report.gd handle it
+		if _placing:
+			_set_placing(false)
+			get_viewport().set_input_as_handled()
+
+func _set_placing(value: bool) -> void:
+	_placing = value
+	selector.visible = value
+
+# Returns true when the mouse is inside the right-side picker panel, or a modal is open
 func _is_over_picker() -> bool:
+	if report_panel and report_panel.visible:
+		return true
 	return get_viewport().get_mouse_position().x >= get_viewport().get_visible_rect().size.x - PICKER_WIDTH
 
 # Retrieve the mesh from a PackedScene, used for dynamically creating a MeshLibrary
@@ -219,6 +266,8 @@ func action_cycle_structure() -> void:
 # Build (place) a structure
 
 func action_build(gridmap_position):
+	if not _placing:
+		return
 	if _is_over_picker():
 		return
 	if Input.is_action_just_pressed("build"):
@@ -230,6 +279,9 @@ func action_build(gridmap_position):
 		var rotation_idx = target_map.get_orthogonal_index_from_basis(selector.basis)
 		var previous_tile = target_map.get_cell_item(gridmap_position)
 		target_map.set_cell_item(gridmap_position, mid, rotation_idx)
+		# Record placement week for aging upkeep (base layer only)
+		if not is_deco:
+			_cell_placed_week[Vector3i(gridmap_position)] = Global.current_week
 		# Clear terrain tile under base-layer placement; reward player for resources
 		if not is_deco and terrain_gridmap:
 			var terrain_tile := terrain_gridmap.get_cell_item(gridmap_position)
@@ -260,6 +312,7 @@ func action_demolish(gridmap_position):
 		elif gridmap.get_cell_item(gridmap_position) != -1:
 			var mid := gridmap.get_cell_item(gridmap_position)
 			gridmap.set_cell_item(gridmap_position, -1)
+			_cell_placed_week.erase(Vector3i(gridmap_position))
 			if mid in _base_id_to_struct:
 				var refund := ceili(structures[_base_id_to_struct[mid]].price / 2.0)
 				map.cash += refund
@@ -287,6 +340,7 @@ func action_rotate():
 
 func select_structure(new_index: int) -> void:
 	index = new_index
+	_set_placing(true)
 	Audio.play("sounds/toggle.ogg", -30)
 	update_structure()
 
@@ -307,6 +361,88 @@ func update_structure():
 func update_cash():
 	cash_display.text = "$" + str(map.cash)
 
+# ── Time & Economy ────────────────────────────────────────────────────────────
+
+func _advance_time(delta: float) -> void:
+	_day_timer += delta
+	if _day_timer >= DAY_DURATION:
+		_day_timer -= DAY_DURATION
+		Global.current_day += 1
+		Global.current_week = Global.current_day / 7
+		_update_date_display()
+		if Global.current_day % PAYDAY_INTERVAL_DAYS == 0:
+			_do_payday()
+
+func _update_date_display() -> void:
+	var d      := Global.current_day
+	var year   := d / 336 + 1
+	var month  := (d % 336) / 28 + 1
+	var week   := (d % 28)  / 7  + 1
+	var day    := d % 7 + 1
+	if date_display:
+		date_display.text = "Year %d  ·  Month %d  ·  Week %d  ·  Day %d" % [year, month, week, day]
+	# Update week-progress clock (5 frames over 7 days)
+	if week_clock:
+		var frame := int(float(d % 7) / 7.0 * 5.0)
+		week_clock.texture = _CLOCK_TEXTURES[clampi(frame, 0, 4)]
+
+func _do_payday() -> void:
+	var total_income := 0
+	var total_upkeep := 0
+	for cell in gridmap.get_used_cells():
+		var mid := gridmap.get_cell_item(cell)
+		if mid == -1 or mid not in _base_id_to_struct:
+			continue
+		var price: int = structures[_base_id_to_struct[mid]].price
+		var income: int = floori(price * 0.05)
+		var placed_week: int = _cell_placed_week.get(cell, Global.current_week)
+		var age_weeks: int   = Global.current_week - placed_week
+		var upkeep_pct: float = minf(0.03, age_weeks * 0.001)
+		var upkeep: int = floori(price * upkeep_pct)
+		total_income += income
+		total_upkeep += upkeep
+	var net := total_income - total_upkeep
+	map.cash += net
+	update_cash()
+	if payday_label:
+		var sign_str := "+" if net >= 0 else ""
+		payday_label.text = "📅 Payday!   +$%d taxes   -$%d upkeep   %s$%d net" % [
+			total_income, total_upkeep, sign_str, net]
+		payday_label.visible = true
+		_payday_label_timer = 8.0
+
+# ── Tax Report ────────────────────────────────────────────────────────────────
+
+func _open_report() -> void:
+	if not report_panel:
+		return
+	var rows: Array = []
+	var total_income := 0
+	var total_upkeep := 0
+	for cell in gridmap.get_used_cells():
+		var mid := gridmap.get_cell_item(cell)
+		if mid == -1 or mid not in _base_id_to_struct:
+			continue
+		var s := structures[_base_id_to_struct[mid]]
+		var income    := floori(s.price * 0.05)
+		var placed_w: int = _cell_placed_week.get(cell, Global.current_week)
+		var age: int      = Global.current_week - placed_w
+		var upk_pct   := minf(0.03, age * 0.001)
+		var upkeep    := floori(s.price * upk_pct)
+		rows.append({
+			"name":       s.display_name,
+			"price":      s.price,
+			"income":     income,
+			"age":        age,
+			"upkeep_pct": upk_pct * 100.0,
+			"upkeep":     upkeep,
+			"net":        income - upkeep,
+		})
+		total_income += income
+		total_upkeep += upkeep
+	report_panel.show_report(rows, total_income, total_upkeep)
+
+
 # Load a saved map from a path, restoring terrain and placed structures
 func _do_load(path: String) -> void:
 	var loaded = ResourceLoader.load(path)
@@ -320,15 +456,22 @@ func _do_load(path: String) -> void:
 		map = DataMap.new()
 		map.cash = Global.starting_cash
 	Global.pending_load = false
+	Global.current_day  = map.current_day
+	Global.current_week = Global.current_day / 7
+	_cell_placed_week.clear()
 	generate_terrain()
 	gridmap.clear()
 	if decoration_gridmap:
 		decoration_gridmap.clear()
 	for cell in map.structures:
+		var gpos := Vector3i(cell.position.x, 0, cell.position.y)
 		var target: GridMap = decoration_gridmap if (cell.layer == 1 and decoration_gridmap) else gridmap
-		target.set_cell_item(Vector3i(cell.position.x, 0, cell.position.y), cell.structure, cell.orientation)
-		if cell.layer == 0 and terrain_gridmap:
-			terrain_gridmap.set_cell_item(Vector3i(cell.position.x, 0, cell.position.y), -1)
+		target.set_cell_item(gpos, cell.structure, cell.orientation)
+		if cell.layer == 0:
+			_cell_placed_week[gpos] = cell.placed_week
+			if terrain_gridmap:
+				terrain_gridmap.set_cell_item(gpos, -1)
+	_update_date_display()
 
 
 # Saving/load
@@ -336,15 +479,17 @@ func _do_load(path: String) -> void:
 func action_save():
 	if Input.is_action_just_pressed("save"):
 		print("Saving map to slot: ", Global.save_slot)
-		map.map_size = Global.map_size
-		map.map_seed = Global.map_seed
+		map.map_size    = Global.map_size
+		map.map_seed    = Global.map_seed
+		map.current_day = Global.current_day
 		map.structures.clear()
 		for cell in gridmap.get_used_cells():
 			var ds := DataStructure.new()
-			ds.position    = Vector2i(cell.x, cell.z)
-			ds.orientation = gridmap.get_cell_item_orientation(cell)
-			ds.structure   = gridmap.get_cell_item(cell)
-			ds.layer       = 0
+			ds.position     = Vector2i(cell.x, cell.z)
+			ds.orientation  = gridmap.get_cell_item_orientation(cell)
+			ds.structure    = gridmap.get_cell_item(cell)
+			ds.layer        = 0
+			ds.placed_week  = _cell_placed_week.get(cell, 0)
 			map.structures.append(ds)
 		if decoration_gridmap:
 			for cell in decoration_gridmap.get_used_cells():

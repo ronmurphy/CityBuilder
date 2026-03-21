@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://vgwrcfy1qawf"]
+[gd_scene load_steps=15 format=3 uid="uid://vgwrcfy1qawf"]
 
 [ext_resource type="Script" uid="uid://76g8ejmdibal" path="res://scripts/builder.gd" id="1_jybm7"]
 [ext_resource type="Environment" uid="uid://jbptgqvstei3" path="res://scenes/main-environment.tres" id="1_yndf3"]
@@ -12,15 +12,19 @@
 [ext_resource type="Texture2D" uid="uid://ciwbdik3tmxtp" path="res://sprites/instructions.png" id="22_pm3ni"]
 [ext_resource type="AudioStream" uid="uid://wvfsgkl8qob6" path="res://sounds/ambience.ogg" id="24_y6deb"]
 [ext_resource type="Script" path="res://scripts/building_picker.gd" id="25_picker"]
+[ext_resource type="Script" path="res://scripts/tax_report.gd" id="26_taxreport"]
+[ext_resource type="Texture2D" path="res://graphics/notepad.png" id="27_notepad"]
+[ext_resource type="Texture2D" path="res://graphics/information.png" id="28_info"]
+[ext_resource type="Texture2D" path="res://graphics/tokens.png" id="29_tokens"]
 
 [sub_resource type="LabelSettings" id="LabelSettings_q176i"]
 font = ExtResource("16_vlub6")
-font_size = 24
+font_size = 18
 shadow_color = Color(0, 0, 0, 0.392157)
 
 [node name="Main" type="Node3D"]
 
-[node name="Builder" type="Node3D" parent="." node_paths=PackedStringArray("selector", "selector_container", "view_camera", "gridmap", "decoration_gridmap", "terrain_gridmap", "cash_display", "building_picker")]
+[node name="Builder" type="Node3D" parent="." node_paths=PackedStringArray("selector", "selector_container", "view_camera", "gridmap", "decoration_gridmap", "terrain_gridmap", "cash_display", "date_display", "payday_label", "week_clock", "report_panel", "building_picker")]
 script = ExtResource("1_jybm7")
 
 selector = NodePath("Selector")
@@ -30,6 +34,10 @@ gridmap = NodePath("../GridMap")
 decoration_gridmap = NodePath("../DecorationGridMap")
 terrain_gridmap = NodePath("../TerrainGridMap")
 cash_display = NodePath("../CanvasLayer/Top/Cash")
+date_display = NodePath("../CanvasLayer/Top/Date")
+payday_label = NodePath("../CanvasLayer/PaydayLabel")
+week_clock = NodePath("../CanvasLayer/Top/WeekClock")
+report_panel = NodePath("../CanvasLayer/TaxReport")
 building_picker = NodePath("../CanvasLayer/BuildingPicker")
 
 [node name="Selector" type="Node3D" parent="Builder"]
@@ -76,27 +84,52 @@ shadow_opacity = 0.75
 
 [node name="Top" type="Control" parent="CanvasLayer"]
 layout_mode = 3
-anchors_preset = 0
-offset_right = 40.0
-offset_bottom = 40.0
+anchor_left = 0.0
+anchor_right = 1.0
+anchor_top = 0.0
+anchor_bottom = 0.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 60.0
 
 [node name="CashIcon" type="TextureRect" parent="CanvasLayer/Top"]
 layout_mode = 0
-offset_left = 20.0
-offset_top = 24.0
-offset_right = 148.0
-offset_bottom = 152.0
-scale = Vector2(0.3, 0.3)
-texture = ExtResource("17_cjamx")
+offset_left = 12.0
+offset_top = 10.0
+offset_right = 30.0
+offset_bottom = 28.0
+expand_mode = 1
+stretch_mode = 5
+texture = ExtResource("29_tokens")
 
 [node name="Cash" type="Label" parent="CanvasLayer/Top"]
 layout_mode = 0
-offset_left = 69.0
-offset_top = 27.0
-offset_right = 270.0
-offset_bottom = 101.0
+offset_left = 34.0
+offset_top = 8.0
+offset_right = 200.0
+offset_bottom = 36.0
 text = "$10,000"
 label_settings = SubResource("LabelSettings_q176i")
+
+[node name="WeekClock" type="TextureRect" parent="CanvasLayer/Top"]
+layout_mode = 0
+offset_left = 210.0
+offset_top = 10.0
+offset_right = 228.0
+offset_bottom = 28.0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Date" type="Label" parent="CanvasLayer/Top"]
+layout_mode = 0
+offset_left = 234.0
+offset_top = 8.0
+offset_right = 760.0
+offset_bottom = 36.0
+text = "Year 1  ·  Month 1  ·  Week 1  ·  Day 1"
+label_settings = SubResource("LabelSettings_q176i")
+
 
 [node name="Bottom" type="Control" parent="CanvasLayer"]
 layout_mode = 3
@@ -109,12 +142,30 @@ grow_vertical = 0
 
 [node name="Instructions" type="TextureRect" parent="CanvasLayer/Bottom"]
 layout_mode = 0
-offset_left = 24.0
-offset_top = 375.0
-offset_right = 344.0
-offset_bottom = 887.0
+offset_left = 16.0
+offset_top = 400.0
+offset_right = 336.0
+offset_bottom = 912.0
 scale = Vector2(0.5, 0.5)
+visible = false
 texture = ExtResource("22_pm3ni")
+
+[node name="PaydayLabel" type="Label" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -400.0
+offset_top = 80.0
+offset_right = 400.0
+offset_bottom = 120.0
+visible = false
+text = "Payday!"
+label_settings = SubResource("LabelSettings_q176i")
+horizontal_alignment = 1
+
+[node name="TaxReport" type="Control" parent="CanvasLayer"]
+script = ExtResource("26_taxreport")
 
 [node name="BuildingPicker" type="Control" parent="CanvasLayer"]
 script = ExtResource("25_picker")

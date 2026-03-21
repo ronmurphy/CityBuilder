@@ -2,6 +2,7 @@ extends Control
 class_name BuildingPicker
 
 signal structure_selected(index: int)
+signal report_requested
 
 var structures: Array = []
 var current_category: String = "All"
@@ -54,18 +55,31 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 6)
 	margin.add_child(vbox)
 
+	var header_row := HBoxContainer.new()
+	vbox.add_child(header_row)
+
 	var header := Label.new()
 	header.text = "BUILD"
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	header.add_theme_font_size_override("font_size", 18)
-	vbox.add_child(header)
+	header_row.add_child(header)
+
+	var report_btn := TextureButton.new()
+	report_btn.texture_normal = load("res://graphics/notepad.png")
+	report_btn.custom_minimum_size = Vector2(20, 20)
+	report_btn.ignore_texture_size = true
+	report_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	report_btn.tooltip_text = "Tax & Upkeep Report"
+	report_btn.pressed.connect(func(): report_requested.emit())
+	header_row.add_child(report_btn)
 
 	vbox.add_child(HSeparator.new())
 
 	var cat_scroll := ScrollContainer.new()
 	cat_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	cat_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	cat_scroll.custom_minimum_size = Vector2(0, 34)
+	cat_scroll.custom_minimum_size = Vector2(0, 44)
 	vbox.add_child(cat_scroll)
 
 	_cat_hbox = HBoxContainer.new()
