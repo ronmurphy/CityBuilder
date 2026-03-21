@@ -11,3 +11,54 @@ var current_week: int = 0
 
 func save_path() -> String:
 	return "user://" + save_slot + ".res"
+
+
+# ── Web / localStorage save system ───────────────────────────────────────────
+# On web builds, Godot's user:// filesystem is not persistent across page
+# reloads.  These helpers serialise DataMap to JSON → base64 → localStorage.
+
+func web_has_save(slot: String) -> bool:
+	var result = JavaScriptBridge.eval('localStorage.getItem("citybuilder_' + slot + '") !== null', true)
+	return result == true
+
+
+func web_save(map: DataMap) -> void:
+	var structs := []
+	for s: DataStructure in map.structures:
+		structs.append({
+			"px": s.position.x, "py": s.position.y,
+			"orientation": s.orientation,
+			"structure": s.structure,
+			"layer": s.layer,
+			"placed_week": s.placed_week,
+		})
+	var data := {
+		"cash": map.cash, "map_size": map.map_size,
+		"map_seed": map.map_seed, "current_day": map.current_day,
+		"structures": structs,
+	}
+	var b64 := Marshalls.utf8_to_base64(JSON.stringify(data))
+	JavaScriptBridge.eval('localStorage.setItem("citybuilder_' + save_slot + '", "' + b64 + '")')
+
+
+func web_load() -> DataMap:
+	var b64 = JavaScriptBridge.eval('localStorage.getItem("citybuilder_' + save_slot + '")', true)
+	if b64 == null:
+		return null
+	var parsed = JSON.parse_string(Marshalls.base64_to_utf8(str(b64)))
+	if parsed == null:
+		return null
+	var map := DataMap.new()
+	map.cash        = int(parsed["cash"])
+	map.map_size    = int(parsed["map_size"])
+	map.map_seed    = int(parsed["map_seed"])
+	map.current_day = int(parsed["current_day"])
+	for sd in parsed["structures"]:
+		var ds := DataStructure.new()
+		ds.position    = Vector2i(int(sd["px"]), int(sd["py"]))
+		ds.orientation = int(sd["orientation"])
+		ds.structure   = int(sd["structure"])
+		ds.layer       = int(sd["layer"])
+		ds.placed_week = int(sd["placed_week"])
+		map.structures.append(ds)
+	return map

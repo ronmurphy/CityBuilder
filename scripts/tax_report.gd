@@ -11,6 +11,7 @@ const PANEL_H: float = 540.0
 
 var _rows_container: VBoxContainer
 var _summary_label:  Label
+var _tax_help_panel: Control = null
 
 
 func _ready() -> void:
@@ -56,7 +57,15 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 20)
 	title_row.add_child(title)
 
-	title_row.add_child(_make_icon(INFO_TEX, 20))
+	var info_btn := TextureButton.new()
+	info_btn.texture_normal = INFO_TEX
+	info_btn.custom_minimum_size = Vector2(20, 20)
+	info_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	info_btn.ignore_texture_size = true
+	info_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	info_btn.tooltip_text = "How taxes & upkeep work"
+	info_btn.pressed.connect(_show_tax_help)
+	title_row.add_child(info_btn)
 
 	var close_btn := TextureButton.new()
 	close_btn.texture_normal = CROSS_TEX
@@ -162,6 +171,96 @@ func _on_close() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		_on_close()
-		get_viewport().set_input_as_handled()
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if _tax_help_panel and _tax_help_panel.visible:
+			_tax_help_panel.visible = false
+			get_viewport().set_input_as_handled()
+			return
+		if visible:
+			_on_close()
+			get_viewport().set_input_as_handled()
+
+
+func _show_tax_help() -> void:
+	if _tax_help_panel == null:
+		_build_tax_help()
+	_tax_help_panel.visible = true
+
+
+func _build_tax_help() -> void:
+	_tax_help_panel = Control.new()
+	_tax_help_panel.anchor_left   = 0.0
+	_tax_help_panel.anchor_right  = 1.0
+	_tax_help_panel.anchor_top    = 0.0
+	_tax_help_panel.anchor_bottom = 1.0
+	_tax_help_panel.mouse_filter  = MOUSE_FILTER_STOP
+	_tax_help_panel.visible = false
+	get_parent().add_child(_tax_help_panel)
+
+	var bg := ColorRect.new()
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0, 0, 0, 0.6)
+	bg.mouse_filter = MOUSE_FILTER_STOP
+	_tax_help_panel.add_child(bg)
+
+	var panel := PanelContainer.new()
+	panel.anchor_left   = 0.5
+	panel.anchor_right  = 0.5
+	panel.anchor_top    = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left   = -260.0
+	panel.offset_right  =  260.0
+	panel.offset_top    = -230.0
+	panel.offset_bottom =  230.0
+	_tax_help_panel.add_child(panel)
+
+	var margin := MarginContainer.new()
+	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		margin.add_theme_constant_override(side, 16)
+	panel.add_child(margin)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	margin.add_child(vbox)
+
+	var top_row := HBoxContainer.new()
+	vbox.add_child(top_row)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "How Taxes & Upkeep Work"
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	top_row.add_child(title_lbl)
+
+	var close_btn := TextureButton.new()
+	close_btn.texture_normal = CROSS_TEX
+	close_btn.custom_minimum_size = Vector2(20, 20)
+	close_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	close_btn.ignore_texture_size = true
+	close_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	close_btn.pressed.connect(func(): _tax_help_panel.visible = false)
+	top_row.add_child(close_btn)
+
+	vbox.add_child(HSeparator.new())
+
+	var sections := [
+		["Income",
+			"Each building earns 5% of its purchase price per payday cycle.\nPayday occurs every 14 in-game days."],
+		["Upkeep",
+			"Buildings age over time and require more maintenance.\nUpkeep starts at 0% and increases by 0.1% per week of age,\nup to a maximum of 3% of purchase price per cycle."],
+		["Net / cycle",
+			"Net = Income − Upkeep\nNewer buildings are more profitable.\nBuildings older than 30 weeks reach peak upkeep cost."],
+	]
+
+	for pair in sections:
+		var heading := Label.new()
+		heading.text = pair[0]
+		heading.add_theme_font_size_override("font_size", 15)
+		vbox.add_child(heading)
+
+		var body := Label.new()
+		body.text = pair[1]
+		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		vbox.add_child(body)
+
+		vbox.add_child(HSeparator.new())

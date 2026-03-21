@@ -10,9 +10,11 @@ func _build_ui() -> void:
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
 
-	var bg := ColorRect.new()
-	bg.color = Color(0.08, 0.09, 0.12, 1.0)
+	var bg := TextureRect.new()
+	bg.texture = load("res://splash-screen.png")
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	canvas.add_child(bg)
 
 	var center := CenterContainer.new()
@@ -71,7 +73,11 @@ func _make_card(info: Dictionary) -> PanelContainer:
 	var slot: String  = info["slot"]
 	var size: int     = info["size"]
 	var cash: int     = info["cash"]
-	var has_save: bool = FileAccess.file_exists("user://" + slot + ".res")
+	var has_save: bool
+	if OS.has_feature("web"):
+		has_save = Global.web_has_save(slot)
+	else:
+		has_save = FileAccess.file_exists("user://" + slot + ".res")
 
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(190, 0)

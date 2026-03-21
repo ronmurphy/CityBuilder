@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3 uid="uid://vgwrcfy1qawf"]
+[gd_scene load_steps=16 format=3 uid="uid://vgwrcfy1qawf"]
 
 [ext_resource type="Script" uid="uid://76g8ejmdibal" path="res://scripts/builder.gd" id="1_jybm7"]
 [ext_resource type="Environment" uid="uid://jbptgqvstei3" path="res://scenes/main-environment.tres" id="1_yndf3"]
@@ -13,6 +13,7 @@
 [ext_resource type="AudioStream" uid="uid://wvfsgkl8qob6" path="res://sounds/ambience.ogg" id="24_y6deb"]
 [ext_resource type="Script" path="res://scripts/building_picker.gd" id="25_picker"]
 [ext_resource type="Script" path="res://scripts/tax_report.gd" id="26_taxreport"]
+[ext_resource type="Script" path="res://scripts/help_overlay.gd" id="30_helpoverlay"]
 [ext_resource type="Texture2D" path="res://graphics/notepad.png" id="27_notepad"]
 [ext_resource type="Texture2D" path="res://graphics/information.png" id="28_info"]
 [ext_resource type="Texture2D" path="res://graphics/tokens.png" id="29_tokens"]
@@ -24,7 +25,7 @@ shadow_color = Color(0, 0, 0, 0.392157)
 
 [node name="Main" type="Node3D"]
 
-[node name="Builder" type="Node3D" parent="." node_paths=PackedStringArray("selector", "selector_container", "view_camera", "gridmap", "decoration_gridmap", "terrain_gridmap", "cash_display", "date_display", "payday_label", "week_clock", "report_panel", "building_picker")]
+[node name="Builder" type="Node3D" parent="." node_paths=PackedStringArray("selector", "selector_container", "view_camera", "gridmap", "decoration_gridmap", "terrain_gridmap", "cash_display", "date_display", "payday_label", "week_clock", "report_panel", "building_picker", "help_panel")]
 script = ExtResource("1_jybm7")
 
 selector = NodePath("Selector")
@@ -39,6 +40,7 @@ payday_label = NodePath("../CanvasLayer/PaydayLabel")
 week_clock = NodePath("../CanvasLayer/Top/WeekClock")
 report_panel = NodePath("../CanvasLayer/TaxReport")
 building_picker = NodePath("../CanvasLayer/BuildingPicker")
+help_panel = NodePath("../CanvasLayer/HelpOverlay")
 
 [node name="Selector" type="Node3D" parent="Builder"]
 
@@ -169,6 +171,9 @@ script = ExtResource("26_taxreport")
 
 [node name="BuildingPicker" type="Control" parent="CanvasLayer"]
 script = ExtResource("25_picker")
+
+[node name="HelpOverlay" type="Control" parent="CanvasLayer"]
+script = ExtResource("30_helpoverlay")
 
 [node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("24_y6deb")

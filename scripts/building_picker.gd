@@ -3,6 +3,7 @@ class_name BuildingPicker
 
 signal structure_selected(index: int)
 signal report_requested
+signal help_requested
 
 var structures: Array = []
 var current_category: String = "All"
@@ -73,6 +74,15 @@ func _build_ui() -> void:
 	report_btn.tooltip_text = "Tax & Upkeep Report"
 	report_btn.pressed.connect(func(): report_requested.emit())
 	header_row.add_child(report_btn)
+
+	var help_btn := TextureButton.new()
+	help_btn.texture_normal = load("res://graphics/information.png")
+	help_btn.custom_minimum_size = Vector2(20, 20)
+	help_btn.ignore_texture_size = true
+	help_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	help_btn.tooltip_text = "Help"
+	help_btn.pressed.connect(func(): help_requested.emit())
+	header_row.add_child(help_btn)
 
 	vbox.add_child(HSeparator.new())
 

@@ -18,6 +18,7 @@ var index:int = 0 # Index of structure being built
 @export var week_clock: TextureRect
 @export var report_panel: Control
 @export var building_picker: BuildingPicker
+@export var help_panel: Control
 
 # Week progress clock textures (timer_0 → timer_100)
 const _CLOCK_TEXTURES: Array = [
@@ -75,6 +76,7 @@ func _ready():
 		building_picker.populate(structures)
 		building_picker.structure_selected.connect(select_structure)
 		building_picker.report_requested.connect(_open_report)
+		building_picker.help_requested.connect(_open_help)
 
 	# Start in browse mode — selector hidden until a building is picked
 	selector.visible = false
@@ -217,6 +219,8 @@ func _load_structures() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if help_panel and help_panel.visible:
+			return  # let help_overlay.gd handle it
 		if report_panel and report_panel.visible:
 			return  # let tax_report.gd handle it
 		if _placing:
@@ -229,6 +233,8 @@ func _set_placing(value: bool) -> void:
 
 # Returns true when the mouse is inside the right-side picker panel, or a modal is open
 func _is_over_picker() -> bool:
+	if help_panel and help_panel.visible:
+		return true
 	if report_panel and report_panel.visible:
 		return true
 	return get_viewport().get_mouse_position().x >= get_viewport().get_visible_rect().size.x - PICKER_WIDTH
@@ -443,9 +449,18 @@ func _open_report() -> void:
 	report_panel.show_report(rows, total_income, total_upkeep)
 
 
+func _open_help() -> void:
+	if help_panel:
+		help_panel.show_overlay()
+
+
 # Load a saved map from a path, restoring terrain and placed structures
 func _do_load(path: String) -> void:
-	var loaded = ResourceLoader.load(path)
+	var loaded
+	if OS.has_feature("web"):
+		loaded = Global.web_load()
+	else:
+		loaded = ResourceLoader.load(path)
 	if loaded:
 		map = loaded
 		if map.map_size > 0:
@@ -499,7 +514,10 @@ func action_save():
 				ds.structure   = decoration_gridmap.get_cell_item(cell)
 				ds.layer       = 1
 				map.structures.append(ds)
-		ResourceSaver.save(map, Global.save_path())
+		if OS.has_feature("web"):
+			Global.web_save(map)
+		else:
+			ResourceSaver.save(map, Global.save_path())
 
 func action_load():
 	if Input.is_action_just_pressed("load"):
