@@ -47,6 +47,9 @@ var _pending_variation_idx: int = 0  # current index into _struct_variation_ids[
 # Categories that keep a single fixed color (no random variation)
 const _NO_VARIATION_CATEGORIES: Array = ["Roads", "Nature"]
 
+# Cache: texture directory path -> Array of variation Texture2Ds (populated once at startup)
+var _variation_tex_cache: Dictionary = {}
+
 # Reverse-lookup: mesh library id -> structure index (for refund on demolish)
 var _base_id_to_struct: Dictionary = {}
 var _deco_id_to_struct: Dictionary = {}
@@ -210,16 +213,19 @@ func _build_mesh_libraries() -> void:
 		decoration_gridmap.mesh_library = deco_lib
 
 
-# Returns variation textures found alongside the model's colormap (variation-a, -b, -c...)
+# Returns cached variation textures for a model's kit (loaded once, reused after)
 func _get_variation_textures(model_path: String) -> Array:
-	var textures: Array = []
 	var tex_dir := model_path.get_base_dir().get_base_dir() + "/Textures/"
+	if _variation_tex_cache.has(tex_dir):
+		return _variation_tex_cache[tex_dir]
+	var textures: Array = []
 	for letter in ["a", "b", "c", "d"]:
 		var path: String = tex_dir + "variation-" + letter + ".png"
 		if ResourceLoader.exists(path):
 			textures.append(load(path))
 		else:
 			break
+	_variation_tex_cache[tex_dir] = textures
 	return textures
 
 
