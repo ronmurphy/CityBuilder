@@ -49,6 +49,8 @@ const _NO_VARIATION_CATEGORIES: Array = ["Roads", "Nature"]
 
 # Cache: texture directory path -> Array of variation Texture2Ds (populated once at startup)
 var _variation_tex_cache: Dictionary = {}
+# Cache: shared materials per variation texture (allows GPU draw-call batching)
+var _variation_mat_cache: Dictionary = {}  # "mat_id:tex_path" -> Material
 
 # Reverse-lookup: mesh library id -> structure index (for refund on demolish)
 var _base_id_to_struct: Dictionary = {}
@@ -229,17 +231,22 @@ func _get_variation_textures(model_path: String) -> Array:
 	return textures
 
 
-# Duplicates a mesh and overrides all surface materials to use the given texture
+# Duplicates a mesh and overrides all surface materials to use the given texture.
+# Materials are shared across all meshes that use the same base material + texture
+# so the GridMap can batch draw calls for the same variation.
 func _apply_texture_to_mesh(base_mesh: Mesh, tex: Texture2D) -> Mesh:
 	var new_mesh := base_mesh.duplicate() as Mesh
 	for surf_idx in new_mesh.get_surface_count():
 		var mat := new_mesh.surface_get_material(surf_idx)
 		if mat == null:
 			continue
-		var new_mat := mat.duplicate()
-		if new_mat is StandardMaterial3D:
-			(new_mat as StandardMaterial3D).albedo_texture = tex
-		new_mesh.surface_set_material(surf_idx, new_mat)
+		var cache_key: String = str(mat.get_instance_id()) + ":" + tex.resource_path
+		if not _variation_mat_cache.has(cache_key):
+			var new_mat := mat.duplicate()
+			if new_mat is StandardMaterial3D:
+				(new_mat as StandardMaterial3D).albedo_texture = tex
+			_variation_mat_cache[cache_key] = new_mat
+		new_mesh.surface_set_material(surf_idx, _variation_mat_cache[cache_key])
 	return new_mesh
 
 # Build terrain MeshLibrary from Nature-category structures
