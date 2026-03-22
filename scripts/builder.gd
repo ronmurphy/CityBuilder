@@ -893,10 +893,14 @@ func _do_save() -> void:
 			ds.layer       = 1
 			map.structures.append(ds)
 	if OS.has_feature("web"):
-		Global.web_save(map)
+		var ok: bool = Global.web_save(map)
+		if ok:
+			Toast.notify("Game saved!", _SAVE_ICON)
+		else:
+			Toast.notify("Save FAILED — localStorage unavailable!", _SAVE_ICON)
 	else:
 		ResourceSaver.save(map, Global.save_path())
-	Toast.notify("Game saved!", _SAVE_ICON)
+		Toast.notify("Game saved!", _SAVE_ICON)
 
 func action_load():
 	if Input.is_action_just_pressed("load"):

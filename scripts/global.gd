@@ -20,11 +20,15 @@ func save_path() -> String:
 # reloads.  These helpers serialise DataMap to JSON → base64 → localStorage.
 
 func web_has_save(slot: String) -> bool:
-	var result = JavaScriptBridge.eval('localStorage.getItem("citybuilder_' + slot + '") !== null', true)
-	return result == true
+	# Return 1/0 from JS instead of a boolean — Godot's JavaScriptBridge
+	# sometimes returns JS true as GDScript int 1 rather than bool true,
+	# so we avoid the fragile `== true` comparison entirely.
+	var result = JavaScriptBridge.eval(
+		'localStorage.getItem("citybuilder_' + slot + '") !== null ? 1 : 0', true)
+	return int(result) == 1
 
 
-func web_save(map: DataMap) -> void:
+func web_save(map: DataMap) -> bool:
 	var structs := []
 	for s: DataStructure in map.structures:
 		structs.append({
@@ -44,7 +48,17 @@ func web_save(map: DataMap) -> void:
 		"structures": structs,
 	}
 	var b64 := Marshalls.utf8_to_base64(JSON.stringify(data))
-	JavaScriptBridge.eval('localStorage.setItem("citybuilder_' + save_slot + '", "' + b64 + '")')
+	# Wrap in try/catch so quota or security errors are caught and reported
+	# rather than failing silently.  Returns 1 on success, 0 on error.
+	var ok = JavaScriptBridge.eval(
+		'(function(){ try { localStorage.setItem("citybuilder_' + save_slot + '","' + b64 + '"); return 1; } catch(e){ console.error("Save failed:",e); return 0; } })()',
+		true)
+	var success: bool = int(ok) == 1
+	if not success:
+		push_warning("[WebSave] localStorage.setItem failed — save NOT written for slot: " + save_slot)
+	else:
+		print("[WebSave] Saved OK to citybuilder_" + save_slot + " (" + str(b64.length()) + " chars)")
+	return success
 
 
 func web_load() -> DataMap:
