@@ -53,9 +53,9 @@ func _build_ui() -> void:
 	vbox.add_child(hbox)
 
 	for info in [
-		{"size": 25,  "slot": "town",       "label": "Town",       "desc": "25 × 25\nQuick game",      "cash": 1000},
-		{"size": 75,  "slot": "city",        "label": "City",       "desc": "75 × 75\nBalanced game",   "cash": 3000},
-		{"size": 150, "slot": "metropolis",  "label": "Metropolis", "desc": "150 × 150\nRoom to expand","cash": 8000},
+		{"size": 25,  "slot": "town",       "label": "Town",       "desc": "25 × 25\nQuick game",      "cash": 2000},
+		{"size": 75,  "slot": "city",        "label": "City",       "desc": "75 × 75\nBalanced game",   "cash": 4000},
+		{"size": 150, "slot": "metropolis",  "label": "Metropolis", "desc": "150 × 150\nRoom to expand","cash": 9000},
 	]:
 		hbox.add_child(_make_card(info))
 

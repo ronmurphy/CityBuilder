@@ -36,7 +36,16 @@ var _placing: bool = false  # true when a structure is selected and ready to pla
 
 # Per-structure mesh library IDs and layer assignments (built in _ready)
 var _struct_mesh_id: Array[int] = []
+var _struct_variation_ids: Array = []  # Array of Array[int]: base + variation IDs per structure
 var _struct_layer:   Array[int] = []
+
+# Pre-picked variation for the next placement (shown in preview)
+var _pending_mid: int = -1
+var _pending_variation_tex: Texture2D = null
+var _pending_variation_idx: int = 0  # current index into _struct_variation_ids[index]
+
+# Categories that keep a single fixed color (no random variation)
+const _NO_VARIATION_CATEGORIES: Array = ["Roads", "Fences", "Nature"]
 
 # Reverse-lookup: mesh library id -> structure index (for refund on demolish)
 var _base_id_to_struct: Dictionary = {}
@@ -151,6 +160,7 @@ func _build_mesh_libraries() -> void:
 	var base_lib := MeshLibrary.new()
 	var deco_lib := MeshLibrary.new()
 	_struct_mesh_id.clear()
+	_struct_variation_ids.clear()
 	_struct_layer.clear()
 	_base_id_to_struct.clear()
 	_deco_id_to_struct.clear()
@@ -160,20 +170,71 @@ func _build_mesh_libraries() -> void:
 		_struct_layer.append(s.layer)
 		if mesh == null:
 			_struct_mesh_id.append(-1)
+			_struct_variation_ids.append([-1])
 			continue
 		var lib: MeshLibrary = deco_lib if s.layer == 1 else base_lib
-		var id := lib.get_last_unused_item_id()
-		lib.create_item(id)
-		lib.set_item_mesh(id, mesh)
-		lib.set_item_mesh_transform(id, Transform3D())
-		_struct_mesh_id.append(id)
+
+		# Register base mesh (embedded colormap)
+		var base_id := lib.get_last_unused_item_id()
+		lib.create_item(base_id)
+		lib.set_item_mesh(base_id, mesh)
+		lib.set_item_mesh_transform(base_id, Transform3D())
+		_struct_mesh_id.append(base_id)
 		if s.layer == 1:
-			_deco_id_to_struct[id] = i
+			_deco_id_to_struct[base_id] = i
 		else:
-			_base_id_to_struct[id] = i
+			_base_id_to_struct[base_id] = i
+
+		var all_ids: Array = [base_id]
+
+		# Register variation meshes for eligible categories
+		if s.category not in _NO_VARIATION_CATEGORIES:
+			for tex in _get_variation_textures(s.model.resource_path):
+				var var_mesh := _apply_texture_to_mesh(mesh, tex)
+				if var_mesh == null:
+					continue
+				var var_id := lib.get_last_unused_item_id()
+				lib.create_item(var_id)
+				lib.set_item_mesh(var_id, var_mesh)
+				lib.set_item_mesh_transform(var_id, Transform3D())
+				if s.layer == 1:
+					_deco_id_to_struct[var_id] = i
+				else:
+					_base_id_to_struct[var_id] = i
+				all_ids.append(var_id)
+
+		_struct_variation_ids.append(all_ids)
+
 	gridmap.mesh_library = base_lib
 	if decoration_gridmap:
 		decoration_gridmap.mesh_library = deco_lib
+
+
+# Returns variation textures found alongside the model's colormap (variation-a, -b, -c...)
+func _get_variation_textures(model_path: String) -> Array:
+	var textures: Array = []
+	var tex_dir := model_path.get_base_dir().get_base_dir() + "/Textures/"
+	for letter in ["a", "b", "c", "d"]:
+		var path: String = tex_dir + "variation-" + letter + ".png"
+		if ResourceLoader.exists(path):
+			textures.append(load(path))
+		else:
+			break
+	return textures
+
+
+# Duplicates a mesh and overrides all surface materials to use the given texture
+func _apply_texture_to_mesh(base_mesh: Mesh, tex: Texture2D) -> Mesh:
+	var new_mesh := base_mesh.duplicate() as Mesh
+	for surf_idx in new_mesh.get_surface_count():
+		var mat := new_mesh.surface_get_material(surf_idx)
+		if mat == null:
+			continue
+		var new_mat := mat.duplicate()
+		if new_mat is StandardMaterial3D:
+			(new_mat as StandardMaterial3D).albedo_texture = tex
+		new_mesh.surface_set_material(surf_idx, new_mat)
+	return new_mesh
 
 # Build terrain MeshLibrary from Nature-category structures
 const TERRAIN_REWARDS: Dictionary = {
@@ -270,7 +331,9 @@ func _load_structures() -> void:
 	print("[Builder] Loaded %d structures" % structures.size())
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+	if not event is InputEventKey or not event.pressed:
+		return
+	if event.keycode == KEY_ESCAPE:
 		if help_panel and help_panel.visible:
 			return  # let help_overlay.gd handle it
 		if report_panel and report_panel.visible:
@@ -278,6 +341,14 @@ func _input(event: InputEvent) -> void:
 		if _placing:
 			_set_placing(false)
 			get_viewport().set_input_as_handled()
+	elif event.keycode == KEY_C and _placing:
+		if index < _struct_variation_ids.size():
+			var ids: Array = _struct_variation_ids[index]
+			if ids.size() > 1:
+				_pending_variation_idx = (_pending_variation_idx + 1) % ids.size()
+				_apply_variation_idx()
+				_update_preview_variation()
+		get_viewport().set_input_as_handled()
 
 func _set_placing(value: bool) -> void:
 	_placing = value
@@ -343,7 +414,7 @@ func action_build(gridmap_position):
 	if _is_over_picker():
 		return
 	if Input.is_action_just_pressed("build"):
-		var mid = _struct_mesh_id[index] if index < _struct_mesh_id.size() else -1
+		var mid: int = _pending_mid
 		if mid == -1:
 			return
 		var is_deco := _struct_layer[index] == 1
@@ -398,6 +469,8 @@ func action_build(gridmap_position):
 			update_cash()
 			Audio.play("sounds/placement-a.ogg, sounds/placement-b.ogg, sounds/placement-c.ogg, sounds/placement-d.ogg", -20)
 			_update_population_display((_compute_city_stats().get("population", 0)) as int)
+		_pick_next_variation()
+		_update_preview_variation()
 
 # Demolish (remove) a structure — decoration layer first, then base
 
@@ -479,6 +552,61 @@ func update_structure():
 	var _model = structures[index].model.instantiate()
 	selector_container.add_child(_model)
 	_model.position.y += 0.25
+	_pick_next_variation()
+	_update_preview_variation()
+
+
+# Pick a random variation for the current structure and store it for next placement
+func _pick_next_variation() -> void:
+	if index >= _struct_variation_ids.size():
+		_pending_mid = -1
+		_pending_variation_tex = null
+		_pending_variation_idx = 0
+		return
+	var ids: Array = _struct_variation_ids[index]
+	if ids.is_empty():
+		_pending_mid = -1
+		_pending_variation_tex = null
+		_pending_variation_idx = 0
+		return
+	_pending_variation_idx = randi() % ids.size()
+	_apply_variation_idx()
+
+
+# Apply _pending_variation_idx to set _pending_mid and _pending_variation_tex
+func _apply_variation_idx() -> void:
+	var ids: Array = _struct_variation_ids[index]
+	_pending_mid = ids[_pending_variation_idx]
+	# Index 0 = base colormap (no override), 1+ = variation-a, -b, etc.
+	if _pending_variation_idx == 0:
+		_pending_variation_tex = null
+	else:
+		var textures: Array = _get_variation_textures(structures[index].model.resource_path)
+		var tex_idx: int = _pending_variation_idx - 1
+		_pending_variation_tex = textures[tex_idx] if tex_idx < textures.size() else null
+
+
+# Apply the pending variation texture to the current selector preview mesh
+func _update_preview_variation() -> void:
+	if selector_container.get_child_count() == 0:
+		return
+	var model_node := selector_container.get_child(0)
+	for child in model_node.get_children():
+		if child is MeshInstance3D:
+			var mi := child as MeshInstance3D
+			if _pending_variation_tex == null:
+				for surf_idx in mi.get_surface_override_material_count():
+					mi.set_surface_override_material(surf_idx, null)
+			else:
+				for surf_idx in mi.mesh.get_surface_count():
+					var mat := mi.get_active_material(surf_idx)
+					if mat == null:
+						continue
+					var new_mat := mat.duplicate()
+					if new_mat is StandardMaterial3D:
+						(new_mat as StandardMaterial3D).albedo_texture = _pending_variation_tex
+					mi.set_surface_override_material(surf_idx, new_mat)
+			break
 
 func update_cash():
 	cash_display.text = "$" + str(map.cash)
