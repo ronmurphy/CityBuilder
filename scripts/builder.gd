@@ -45,7 +45,7 @@ var _pending_variation_tex: Texture2D = null
 var _pending_variation_idx: int = 0  # current index into _struct_variation_ids[index]
 
 # Categories that keep a single fixed color (no random variation)
-const _NO_VARIATION_CATEGORIES: Array = ["Roads", "Fences", "Nature"]
+const _NO_VARIATION_CATEGORIES: Array = ["Roads", "Nature"]
 
 # Reverse-lookup: mesh library id -> structure index (for refund on demolish)
 var _base_id_to_struct: Dictionary = {}

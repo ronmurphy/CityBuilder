@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="Structure" format=3 uid="uid://ch8vtcpine1lc"]
+
+[ext_resource type="PackedScene" uid="uid://cpv75mfsda1ml" path="res://models/pavement.glb" id="1_gudnj"]
+[ext_resource type="Script" uid="uid://b4i7dfy6u3e8w" path="res://scripts/structure.gd" id="2_i48go"]
+[ext_resource type="Texture2D" path="res://models/City Kit - Roads/Previews/pavement.png" id="3_thumb"]
+
+[resource]
+script = ExtResource("2_i48go")
+display_name = "Pavement"
+category = "Roads"
+model = ExtResource("1_gudnj")
+price = 10
+thumbnail = ExtResource("3_thumb")
