@@ -46,6 +46,7 @@ var _deco_id_to_struct: Dictionary = {}
 var _cell_placed_week: Dictionary = {}   # Vector3i -> int (week placed)
 var _cell_job_slots: Dictionary  = {}   # Vector3i -> int (workers, locked at placement)
 var _cell_patience: Dictionary   = {}   # Vector3i -> int (0–10, residential only)
+var _multi_cell_anchor: Dictionary = {} # Vector3i -> Vector3i (child cell -> anchor cell for multi-tile structures)
 var _payday_count: int = 0              # total paydays elapsed (tracks grace period)
 var _day_timer: float = 0.0
 const DAY_DURATION: float = 30.0         # real seconds per in-game day
@@ -322,6 +323,20 @@ func action_cycle_structure() -> void:
 
 # Build (place) a structure
 
+func _get_footprint_cells(anchor: Vector3i, s: Structure) -> Array:
+	# Returns all Vector3i cells occupied by a structure placed at anchor.
+	# For a 1×1 structure, returns just [anchor].
+	# For larger structures, centers the footprint around the anchor
+	# (the mesh origin is at the center of the model, not the corner).
+	var cells: Array = []
+	var off_x: int = (s.footprint.x - 1) / 2
+	var off_z: int = (s.footprint.y - 1) / 2
+	for dx in range(s.footprint.x):
+		for dz in range(s.footprint.y):
+			cells.append(Vector3i(anchor.x - off_x + dx, anchor.y, anchor.z - off_z + dz))
+	return cells
+
+
 func action_build(gridmap_position):
 	if not _placing:
 		return
@@ -334,30 +349,52 @@ func action_build(gridmap_position):
 		var is_deco := _struct_layer[index] == 1
 		var target_map: GridMap = decoration_gridmap if is_deco else gridmap
 		var rotation_idx = target_map.get_orthogonal_index_from_basis(selector.basis)
+		var s: Structure = structures[index]
+		var anchor := Vector3i(gridmap_position)
+		var fp_cells: Array = _get_footprint_cells(anchor, s)
+
+		# Check ALL footprint cells are clear before placing
+		if not is_deco:
+			for cell in fp_cells:
+				var vcell := Vector3i(cell)
+				if gridmap.get_cell_item(vcell) != -1 or _multi_cell_anchor.has(vcell):
+					Toast.notify("Not enough room!", _WARN_ICON)
+					return
+
 		var previous_tile = target_map.get_cell_item(gridmap_position)
+		# Place the mesh at the anchor cell
 		target_map.set_cell_item(gridmap_position, mid, rotation_idx)
+
 		# Record placement week for aging upkeep (base layer only)
 		if not is_deco:
-			_cell_placed_week[Vector3i(gridmap_position)] = Global.current_week
+			_cell_placed_week[anchor] = Global.current_week
 			# Lock in randomised job slots for commercial / industrial buildings
 			var s_idx: int = _base_id_to_struct.get(mid, -1)
 			if s_idx != -1:
-				_cell_job_slots[Vector3i(gridmap_position)] = \
-					_gen_job_slots(structures[s_idx].category, structures[s_idx].price)
+				_cell_job_slots[anchor] = \
+					_gen_job_slots(s.category, s.price)
 				# New residential buildings start with slightly varied patience
-				if structures[s_idx].category == "Buildings":
-					_cell_patience[Vector3i(gridmap_position)] = randi_range(8, 10)
-		# Clear terrain tile under base-layer placement; reward player for resources
+				if s.category == "Buildings":
+					_cell_patience[anchor] = randi_range(8, 10)
+			# Register multi-cell footprint so child cells block future placement
+			if s.footprint.x > 1 or s.footprint.y > 1:
+				for cell in fp_cells:
+					_multi_cell_anchor[Vector3i(cell)] = anchor
+
+		# Clear terrain tiles under ALL footprint cells; reward player for resources
 		if not is_deco and terrain_gridmap:
-			var terrain_tile := terrain_gridmap.get_cell_item(gridmap_position)
-			if terrain_tile != -1:
-				var reward: int = _terrain_rewards.get(terrain_tile, 0)
-				if reward > 0:
-					map.cash += reward
-					update_cash()
-				terrain_gridmap.set_cell_item(gridmap_position, -1)
+			for cell in fp_cells:
+				var vcell := Vector3i(cell)
+				var terrain_tile := terrain_gridmap.get_cell_item(vcell)
+				if terrain_tile != -1:
+					var reward: int = _terrain_rewards.get(terrain_tile, 0)
+					if reward > 0:
+						map.cash += reward
+					terrain_gridmap.set_cell_item(vcell, -1)
+			update_cash()
+
 		if previous_tile != mid:
-			map.cash -= structures[index].price
+			map.cash -= s.price
 			update_cash()
 			Audio.play("sounds/placement-a.ogg, sounds/placement-b.ogg, sounds/placement-c.ogg, sounds/placement-d.ogg", -20)
 			_update_population_display((_compute_city_stats().get("population", 0)) as int)
@@ -367,29 +404,45 @@ func action_build(gridmap_position):
 func action_demolish(gridmap_position):
 	if Input.is_action_just_pressed("demolish"):
 		var removed := false
-		if decoration_gridmap and decoration_gridmap.get_cell_item(gridmap_position) != -1:
-			var mid := decoration_gridmap.get_cell_item(gridmap_position)
-			decoration_gridmap.set_cell_item(gridmap_position, -1)
+		var pos := Vector3i(gridmap_position)
+		if decoration_gridmap and decoration_gridmap.get_cell_item(pos) != -1:
+			var mid := decoration_gridmap.get_cell_item(pos)
+			decoration_gridmap.set_cell_item(pos, -1)
 			if mid in _deco_id_to_struct:
 				var refund := ceili(structures[_deco_id_to_struct[mid]].price / 2.0)
 				map.cash += refund
 				update_cash()
 			removed = true
-		elif gridmap.get_cell_item(gridmap_position) != -1:
-			var mid := gridmap.get_cell_item(gridmap_position)
-			gridmap.set_cell_item(gridmap_position, -1)
-			_cell_placed_week.erase(Vector3i(gridmap_position))
-			_cell_job_slots.erase(Vector3i(gridmap_position))
-			_cell_patience.erase(Vector3i(gridmap_position))
-			if mid in _base_id_to_struct:
-				var refund := ceili(structures[_base_id_to_struct[mid]].price / 2.0)
+		elif gridmap.get_cell_item(pos) != -1 or _multi_cell_anchor.has(pos):
+			# If user clicked a child cell of a multi-tile structure, find the anchor
+			var anchor: Vector3i = _multi_cell_anchor.get(pos, pos) as Vector3i
+			var mid := gridmap.get_cell_item(anchor)
+			if mid == -1:
+				return
+			# Determine the footprint so we can clean up all cells
+			var s_idx: int = _base_id_to_struct.get(mid, -1)
+			var fp := Vector2i(1, 1)
+			if s_idx != -1:
+				fp = structures[s_idx].footprint
+				var refund := ceili(structures[s_idx].price / 2.0)
 				map.cash += refund
 				update_cash()
-			# Restore terrain tile underneath
-			if terrain_gridmap:
-				var tile := _get_terrain_tile(gridmap_position.x, gridmap_position.z)
-				if tile != -1:
-					terrain_gridmap.set_cell_item(gridmap_position, tile)
+			# Remove the mesh from the anchor cell
+			gridmap.set_cell_item(anchor, -1)
+			_cell_placed_week.erase(anchor)
+			_cell_job_slots.erase(anchor)
+			_cell_patience.erase(anchor)
+			# Clean up all footprint cells — restore terrain and clear multi-cell tracking
+			var off_x: int = (fp.x - 1) / 2
+			var off_z: int = (fp.y - 1) / 2
+			for dx in range(fp.x):
+				for dz in range(fp.y):
+					var cell := Vector3i(anchor.x - off_x + dx, anchor.y, anchor.z - off_z + dz)
+					_multi_cell_anchor.erase(cell)
+					if terrain_gridmap:
+						var tile := _get_terrain_tile(cell.x, cell.z)
+						if tile != -1:
+							terrain_gridmap.set_cell_item(cell, tile)
 			removed = true
 		if removed:
 			Audio.play("sounds/removal-a.ogg, sounds/removal-b.ogg, sounds/removal-c.ogg, sounds/removal-d.ogg", -20)
@@ -867,6 +920,7 @@ func _do_load(path: String) -> void:
 	_cell_placed_week.clear()
 	_cell_job_slots.clear()
 	_cell_patience.clear()
+	_multi_cell_anchor.clear()
 	generate_terrain()
 	gridmap.clear()
 	if decoration_gridmap:
@@ -888,6 +942,19 @@ func _do_load(path: String) -> void:
 				_cell_job_slots[gpos] = slots
 			# Restore patience (defaults to 10 for old saves via DataStructure @export default)
 			_cell_patience[gpos] = cell.patience
+			# Rebuild multi-cell footprint tracking for large structures
+			if cell.structure in _base_id_to_struct:
+				var s_idx: int = _base_id_to_struct[cell.structure]
+				var fp: Vector2i = structures[s_idx].footprint
+				if fp.x > 1 or fp.y > 1:
+					var off_x: int = (fp.x - 1) / 2
+					var off_z: int = (fp.y - 1) / 2
+					for dx in range(fp.x):
+						for dz in range(fp.y):
+							var child := Vector3i(gpos.x - off_x + dx, gpos.y, gpos.z - off_z + dz)
+							_multi_cell_anchor[child] = gpos
+							if terrain_gridmap:
+								terrain_gridmap.set_cell_item(child, -1)
 	_update_date_display()
 
 

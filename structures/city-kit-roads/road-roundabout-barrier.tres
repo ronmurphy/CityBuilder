@@ -9,4 +9,6 @@ display_name = "Road Roundabout Barrier"
 category = "Roads"
 model = ExtResource("2")
 price = 80
+layer = 1
+footprint = Vector2i(3, 3)
 thumbnail = ExtResource("3")

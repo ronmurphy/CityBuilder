@@ -11,6 +11,7 @@ class_name Structure
 @export_subgroup("Gameplay")
 @export var price: int   # Price of the structure when building
 @export var layer: int = 0  # 0 = base (ground tile), 1 = decoration (placed on top of base)
+@export var footprint: Vector2i = Vector2i(1, 1)  # Grid cells this structure occupies (width x depth)
 
 @export_subgroup("Visuals")
 @export var thumbnail: Texture2D # Preview image shown in the building picker

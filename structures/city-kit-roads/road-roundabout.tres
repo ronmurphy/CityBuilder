@@ -9,4 +9,5 @@ display_name = "Road Roundabout"
 category = "Roads"
 model = ExtResource("2")
 price = 80
+footprint = Vector2i(3, 3)
 thumbnail = ExtResource("3")
