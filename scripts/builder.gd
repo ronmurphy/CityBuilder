@@ -12,6 +12,7 @@ var index:int = 0 # Index of structure being built
 @export var gridmap: GridMap            # Layer 1 — player-placed base tiles
 @export var decoration_gridmap: GridMap # Layer 2 — lights, signs, construction
 @export var terrain_gridmap: GridMap    # Layer 0 — auto-generated terrain
+@export var underlay_gridmap: GridMap   # Permanent grass underlay — never cleared
 @export var cash_display: Label
 @export var date_display: Label
 @export var week_clock: TextureRect
@@ -88,6 +89,17 @@ func _ready():
 		map.cash = Global.starting_cash
 		_payday_count = 0   # fresh game always starts in the grace period
 		generate_terrain()
+
+	# Permanent grass underlay — fills road-edge gaps so the grey background
+	# never shows through. Sits at y = -0.05 (just below terrain tiles) and
+	# is never modified by build / demolish / load.
+	_spawn_ground_underlay()
+
+	# Keep background music looping: reconnect finished → play each time the
+	# clip ends so it restarts automatically.
+	var asp := get_parent().get_node_or_null("AudioStreamPlayer") as AudioStreamPlayer
+	if asp and not asp.finished.is_connected(asp.play):
+		asp.finished.connect(asp.play)
 
 	if building_picker:
 		building_picker.populate(structures)
@@ -208,6 +220,26 @@ func generate_terrain() -> void:
 			if tile != -1:
 				terrain_gridmap.set_cell_item(Vector3i(x, 0, z), tile)
 	print("[Builder] Terrain generated %dx%d seed=%d" % [Global.map_size, Global.map_size, Global.map_seed])
+
+
+func _spawn_ground_underlay() -> void:
+	# Fill the underlay GridMap with plain grass tiles across the entire map.
+	# This layer is NEVER cleared by build / demolish / load, so it always
+	# shows through any gaps in road-corner geometry or missing terrain tiles.
+	if not underlay_gridmap:
+		return
+	# Share the same mesh library as the terrain — we only need the plain grass tile
+	underlay_gridmap.mesh_library = terrain_gridmap.mesh_library
+	underlay_gridmap.clear()
+	var grass_id: int = _terrain_mesh_ids.get("grass", -1)
+	if grass_id == -1:
+		push_warning("[Builder] No grass tile found — underlay skipped")
+		return
+	var half := Global.map_size / 2
+	for x in range(-half, half):
+		for z in range(-half, half):
+			underlay_gridmap.set_cell_item(Vector3i(x, 0, z), grass_id)
+	print("[Builder] Ground underlay filled %dx%d with grass" % [Global.map_size, Global.map_size])
 
 
 func _get_terrain_tile(x: int, z: int) -> int:
